@@ -7,7 +7,8 @@ import { cn } from '@/lib/utils'
 /**
  * 写真を受け取る領域。`<label>` で入力を包んであるので、
  * クリックでもタップでもファイル選択が開く。ドラッグ&ドロップはページ全体が受ける。
- * 選んだあとはこの領域自体が、ファイル名とリセットの行と、選んだ写真の表示になる。そのまま次の写真も受け取れる
+ * 選んだあとはこの領域自体が、ファイル名とリセットの行と、選んだ写真の表示になる。そのまま次の写真も受け取れる。
+ * 読み取り中は選び直しもリセットもできない (読み取り中の表示を見せたいので、disabled と違って薄くはしない)
  */
 export function PhotoDropzone({
   onSelect,
@@ -27,6 +28,7 @@ export function PhotoDropzone({
   showDropHint?: boolean
 }) {
   const inputId = useId()
+  const locked = disabled || reading
   const inputRef = useRef<HTMLInputElement>(null)
   const take = (files: FileList | null) => {
     const file = files?.[0]
@@ -39,7 +41,8 @@ export function PhotoDropzone({
     <label
       htmlFor={inputId}
       className={cn(
-        'flex w-full cursor-pointer rounded-xl bg-card transition-colors hover:bg-muted/50',
+        'flex w-full rounded-xl bg-card transition-colors',
+        !locked && 'cursor-pointer hover:bg-muted/50',
         selected
           ? 'flex-col gap-3 border p-3 text-left'
           : 'flex-col items-center justify-center gap-3 border-2 border-dashed px-6 py-10 text-center',
@@ -64,19 +67,20 @@ export function PhotoDropzone({
                 e.preventDefault()
                 onReset()
               }}
-              disabled={disabled}
+              disabled={locked}
             >
               <XIcon />
               リセット
             </Button>
           </div>
-          {/* 選んだ写真そのもの (押すと別の写真を選び直せる)。読み取り中は上に幕をかけて、動いていることを示す */}
-          <div className="relative mx-auto w-fit">
+          {/* 選んだ写真そのもの (読み取り中でなければ、押すと別の写真を選び直せる)。読み取り中は上に幕をかけて、動いていることを示す。
+              古いスマホでは大きな写真が出るまで時間がかかり、その間は写真の大きさが 0 なので、枠に最低限の大きさを持たせる */}
+          <div className="relative mx-auto flex min-h-48 w-fit min-w-64 items-center justify-center rounded-md bg-muted">
             <img src={selected.url} alt="選んだ写真" className="max-h-[40vh] w-auto rounded-md" />
             {reading && (
               <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 rounded-md bg-background/75 backdrop-blur-[2px]">
                 <LoaderCircleIcon className="size-9 animate-spin text-primary" />
-                <p className="text-sm font-medium">護石を読み取っています…</p>
+                <p className="text-sm font-medium whitespace-nowrap">護石を読み取っています…</p>
                 <div className="h-1 w-40 overflow-hidden rounded-full bg-muted">
                   <div className="h-full w-1/3 animate-indeterminate rounded-full bg-primary" />
                 </div>
@@ -103,7 +107,7 @@ export function PhotoDropzone({
         type="file"
         accept="image/*,.heic,.heif"
         className="sr-only"
-        disabled={disabled}
+        disabled={locked}
         onChange={(e) => take(e.target.files)}
       />
     </label>

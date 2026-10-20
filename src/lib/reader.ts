@@ -2,6 +2,7 @@
 // Worker はページを開いている間 1 つだけ。頼んだ順に 1 つずつ処理される
 import type { Charm, FrameCandidate, ReadResult, SkillInfo } from '../../renkin-reader/pkg/renkin_reader.js'
 import type { WorkerRequest, WorkerResponse } from '../workers/reader.worker'
+import workerUrl from '../workers/reader.worker.ts?worker&url'
 
 /** 頼む内容 (id は call が付ける)。ユニオンの各要素から id を外す */
 type Request = WorkerRequest extends infer R ? (R extends unknown ? Omit<R, 'id'> : never) : never
@@ -30,10 +31,22 @@ function discard(error: Error) {
   pending.clear()
 }
 
+/** Worker を作る。本物の Worker のスクリプトを、blob: の小さな Worker から読み込む。
+ * 公開版の外部通信の禁止 (index.html の meta の CSP、vite.config.ts) は、URL から作った Worker には効かない
+ * (Worker は自分のレスポンスヘッダーの CSP に従い、GitHub Pages はそれを付けない)。blob: から作った Worker は
+ * ページの CSP を引き継ぐので、写真を扱う Worker の中でも外には通信できない */
+function createWorker(): Worker {
+  const source = `import ${JSON.stringify(new URL(workerUrl, window.location.href).href)}`
+  const url = URL.createObjectURL(new Blob([source], { type: 'text/javascript' }))
+  const created = new Worker(url, { type: 'module' })
+  URL.revokeObjectURL(url)
+  return created
+}
+
 function start(): Promise<SkillInfo[]> {
   if (skillsReady) return skillsReady
   skillsReady = new Promise((resolveSkills, rejectSkills) => {
-    worker = new Worker(new URL('../workers/reader.worker.ts', import.meta.url), { type: 'module' })
+    worker = createWorker()
     worker.onmessage = (event: MessageEvent<WorkerResponse>) => {
       const message = event.data
       if (message.type === 'ready') {
