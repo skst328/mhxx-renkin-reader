@@ -107,8 +107,12 @@ export default function App() {
     setStage('edit')
   }
 
+  /** 最後に頼んだ読み取りの番号。読み取り中に別の写真を選んだら、前の読み取りの結果は捨てる */
+  const readId = useRef(0)
+
   // 写真を選んだら、そのまま読み取る
   const select = async (file: File) => {
+    const id = ++readId.current
     setPhoto({ url: URL.createObjectURL(file), name: file.name, detail: formatBytes(file.size) })
     setStage('reading')
     setFound(null)
@@ -116,14 +120,18 @@ export default function App() {
     setError(null)
     try {
       const { result, aligned: screen } = await readPhoto(file)
+      if (id !== readId.current) return
       show(result, screen && URL.createObjectURL(screen))
     } catch (e) {
+      if (id !== readId.current) return
       setError((e as Error).message)
       setStage('none')
     }
   }
 
   const reset = () => {
+    // 読み取り中ならその結果は捨てる
+    readId.current++
     setPhoto(null)
     setAligned(null)
     setDraft(EMPTY)
@@ -151,7 +159,8 @@ export default function App() {
   const impossible =
     skills !== null &&
     (!possible(skills, 'skill1', draft.skill1, draft.pts1) || !possible(skills, 'skill2', draft.skill2, draft.pts2))
-  const canSearch = isComplete(draft) && !impossible && start !== null && end !== null && start < end && !searching
+  const canSearch =
+    isComplete(draft) && !impossible && start !== null && end !== null && start < end && !searching && stage !== 'reading'
   const unconfirmed = Object.keys(unsure).length > 0
 
   // 検索が終わったら結果のカードまで移る
@@ -201,7 +210,11 @@ export default function App() {
     <main className="mx-auto flex min-h-dvh w-full max-w-5xl flex-col gap-6 px-4 py-8">
       <header className="flex items-start justify-between gap-3">
         <div className="space-y-1">
-          <h1>MHXX 鑑定スキャン</h1>
+          {/* ファビコンと同じアイコンを添えて、兄弟ツール (mhxx-combo-scan) と見分けやすくする */}
+          <h1 className="flex items-center gap-3">
+            <img src={`${import.meta.env.BASE_URL}favicon.svg`} alt="" className="size-9 shrink-0 sm:size-10" />
+            MHXX 鑑定スキャン
+          </h1>
           <p className="text-sm text-muted-foreground sm:text-base">鑑定画面の写真から、錬金時のフレームを特定します</p>
         </div>
         <ThemeToggle />

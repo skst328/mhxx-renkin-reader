@@ -213,4 +213,39 @@ mod tests {
         ));
         assert!(r.aligned_image().is_none());
     }
+
+    /// 変な大きさや中身の画像でも panic せず、撮り直し (か読めた結果) を返す。1 つの Reader を使い回す
+    #[test]
+    fn odd_images_do_not_panic() {
+        let mut r = Reader::new();
+        let mut seed = 7u32;
+        let mut noise = |n: usize| -> Vec<u8> {
+            (0..n)
+                .map(|_| {
+                    seed = seed.wrapping_mul(1_103_515_245).wrapping_add(12345);
+                    (seed >> 16) as u8
+                })
+                .collect()
+        };
+        for (w, h) in [
+            (1, 1),
+            (3000, 2),
+            (2, 3000),
+            (17, 9),
+            (64, 64),
+            (1280, 720),
+            (4000, 300),
+        ] {
+            for rgba in [vec![0; w * h * 4], vec![255; w * h * 4], noise(w * h * 4)] {
+                let result = r.read(&rgba, w as u32, h as u32).unwrap();
+                assert!(
+                    matches!(
+                        result,
+                        ReadResult::Rejected { .. } | ReadResult::Read { .. }
+                    ),
+                    "{w}x{h}"
+                );
+            }
+        }
+    }
 }

@@ -23,7 +23,10 @@ export type WorkerResponse =
   /** 探索の進み具合 (探し終えたフレームの数 / 全体) */
   | { id: number; type: 'progress'; done: number; total: number }
   | { id: number; type: 'cancelled' }
-  | { id: number; type: 'error'; message: string }
+  /** fatal: wasm の中で落ちた (または wasm を読み込めなかった) ので、この Worker はもう使えない。ページ側で作り直す */
+  | { id: number; type: 'error'; message: string; fatal: boolean }
+  /** wasm を読み込めなかった (ページ側で作り直す) */
+  | { type: 'failed'; message: string }
 
 /** 位置合わせ後の画面の大きさ (Reader.alignedImage() の画素の並び) */
 const SCREEN = { width: 1280, height: 720 }
@@ -31,6 +34,10 @@ const SCREEN = { width: 1280, height: 720 }
 const post = (message: WorkerResponse) => self.postMessage(message)
 
 const ready = init().then(() => post({ type: 'ready', skills: skills() }))
+ready.catch((e: unknown) => post({ type: 'failed', message: e instanceof Error ? e.message : String(e) }))
+
+/** 写真を開けなかった (wasm の状態には関係ないので、Worker はそのまま使える) */
+class DecodeError extends Error {}
 
 let reader: Reader | null = null
 
@@ -46,11 +53,11 @@ async function decode(file: Blob): Promise<ImageData> {
   try {
     bitmap = await createImageBitmap(file, { imageOrientation: 'from-image' })
   } catch {
-    throw new Error('この画像は開けません。HEIC は対応していないブラウザがあるので、JPEG で保存し直してください')
+    throw new DecodeError('この画像は開けません。HEIC は対応していないブラウザがあるので、JPEG で保存し直してください')
   }
   const canvas = new OffscreenCanvas(bitmap.width, bitmap.height)
   const context = canvas.getContext('2d')
-  if (!context) throw new Error('画像を処理できません')
+  if (!context) throw new DecodeError('画像を処理できません')
   context.drawImage(bitmap, 0, 0)
   bitmap.close()
   return context.getImageData(0, 0, canvas.width, canvas.height)
@@ -103,6 +110,10 @@ self.onmessage = (event: MessageEvent<WorkerRequest>) => {
     return
   }
   handle(request).catch((e: unknown) => {
-    post({ id: request.id, type: 'error', message: e instanceof Error ? e.message : String(e) })
+    // 写真を開けなかっただけなら続けて使える。それ以外 (wasm の中で落ちたなど) は wasm の状態が信用できないので、
+    // ページ側にこの Worker を捨ててもらう
+    const fatal = !(e instanceof DecodeError)
+    if (fatal) console.error(e)
+    post({ id: request.id, type: 'error', message: e instanceof Error ? e.message : String(e), fatal })
   })
 }

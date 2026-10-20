@@ -18,6 +18,18 @@ let skillsReady: Promise<SkillInfo[]> | null = null
 const pending = new Map<number, Pending>()
 let nextId = 1
 
+/** wasm の中で落ちたときなどに出す文 (元のエラーは Worker 側でコンソールに出す) */
+const BROKEN = '処理中に問題が起きました。もう一度試すと、読み取りの準備からやり直します'
+
+/** Worker を捨てる。待っている頼みごとは全部失敗にし、次の頼みごとで作り直す */
+function discard(error: Error) {
+  worker?.terminate()
+  worker = null
+  skillsReady = null
+  for (const p of pending.values()) p.reject(error)
+  pending.clear()
+}
+
 function start(): Promise<SkillInfo[]> {
   if (skillsReady) return skillsReady
   skillsReady = new Promise((resolveSkills, rejectSkills) => {
@@ -28,6 +40,12 @@ function start(): Promise<SkillInfo[]> {
         resolveSkills(message.skills)
         return
       }
+      if (message.type === 'failed') {
+        const error = new Error(`読み取りの準備に失敗しました (${message.message})`)
+        rejectSkills(error)
+        discard(error)
+        return
+      }
       const p = pending.get(message.id)
       if (!p) return
       if (message.type === 'progress') {
@@ -35,15 +53,15 @@ function start(): Promise<SkillInfo[]> {
         return
       }
       pending.delete(message.id)
-      if (message.type === 'error') p.reject(new Error(message.message))
+      if (message.type === 'error' && message.fatal) discard(new Error(BROKEN))
+      if (message.type === 'error') p.reject(new Error(message.fatal ? BROKEN : message.message))
       else if (message.type === 'cancelled') p.reject(new DOMException('中止しました', 'AbortError'))
       else p.resolve(message)
     }
     worker.onerror = (event) => {
       const error = new Error(event.message || '読み取りの準備に失敗しました')
       rejectSkills(error)
-      for (const p of pending.values()) p.reject(error)
-      pending.clear()
+      discard(error)
     }
   })
   return skillsReady
