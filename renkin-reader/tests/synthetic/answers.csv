@@ -1,0 +1,13 @@
+file,index,skill1,pts1,skill2,pts2,slot,expect,note
+01_basic.jpg,1,射法,3,KO,1,2,,正面から少し斜め (素材 20261010192445-01M4JN7AY3RQCRADWB5M98SGTQ.jpg)
+02_oblique.jpg,2,跳躍,4,,,1,,横から強く斜め (素材 20261010192446-01M4JN7H79MXMNMND83A7YPD69.jpg)
+03_portrait_tilted.jpg,3,斬れ味,3,紫毒姫,1,1,,縦長の写真で画面が傾いている (素材 20261010192447-01M4JN806T3TJVK9MCCVD57JYH.jpg)
+04_far.jpg,4,減気攻撃,4,,,1,,遠くから (画面が小さく写る) (素材 20261010192448-01M4JN87PQ92KAMGZ65KRA0RYD.jpg)
+05_noisy_jpeg.jpg,3,斬れ味,3,紫毒姫,1,1,,ノイズと強い JPEG (素材 20261010192447-01M4JN806T3TJVK9MCCVD57JYH.jpg)
+06_dark.jpg,4,減気攻撃,4,,,1,,暗い (素材 20261010192448-01M4JN87PQ92KAMGZ65KRA0RYD.jpg)
+07_glare.jpg,1,射法,3,KO,1,2,,パネルの近くに反射 (素材 20261010192445-01M4JN7AY3RQCRADWB5M98SGTQ.jpg)
+08_mirrored.jpg,2,跳躍,4,,,1,,左右反転して保存された写真 (素材 20261010192446-01M4JN7H79MXMNMND83A7YPD69.jpg)
+09_small_image.jpg,3,斬れ味,3,紫毒姫,1,1,,長辺 2000px 未満の写真 (拡大して使う) (素材 20261010192447-01M4JN806T3TJVK9MCCVD57JYH.jpg)
+10_motion.jpg,4,減気攻撃,4,,,1,,手ぶれ (素材 20261010192448-01M4JN87PQ92KAMGZ65KRA0RYD.jpg)
+11_too_small.jpg,,射法,3,KO,1,2,retake,画面が小さすぎる (素材 20261010192445-01M4JN7AY3RQCRADWB5M98SGTQ.jpg)
+12_no_screen.jpg,,攻撃,1,,,,retake,画面が写っていない
