@@ -1,6 +1,7 @@
 // ページ側から Worker (src/workers/reader.worker.ts) に読み取りとフレーム探索を頼む。
 // Worker はページを開いている間 1 つだけ。頼んだ順に 1 つずつ処理される
 import type { Charm, FrameCandidate, ReadResult, SkillInfo } from '../../renkin-reader/pkg/renkin_reader.js'
+import type { PhotoDebug } from '@/lib/debug'
 import type { WorkerRequest, WorkerResponse } from '../workers/reader.worker'
 
 /** 頼む内容 (id は call が付ける)。ユニオンの各要素から id を外す */
@@ -20,6 +21,17 @@ let nextId = 1
 
 /** wasm の中で落ちたときなどに出す文 (元のエラーは Worker 側でコンソールに出す) */
 const BROKEN = '処理中に問題が起きました。もう一度試すと、読み取りの準備からやり直します'
+
+/** Worker で写真を開けなかった。detail は元のエラー (デバッグ用) */
+class DecodeFailure extends Error {
+  readonly detail: string
+  readonly ms: number
+  constructor(message: string, detail: string, ms: number) {
+    super(message)
+    this.detail = detail
+    this.ms = ms
+  }
+}
 
 /** Worker を捨てる。待っている頼みごとは全部失敗にし、次の頼みごとで作り直す */
 function discard(error: Error) {
@@ -54,7 +66,9 @@ function start(): Promise<SkillInfo[]> {
       }
       pending.delete(message.id)
       if (message.type === 'error' && message.fatal) discard(new Error(BROKEN))
-      if (message.type === 'error') p.reject(new Error(message.fatal ? BROKEN : message.message))
+      if (message.type === 'error' && message.decode)
+        p.reject(new DecodeFailure(message.message, message.decode.detail, message.decode.ms))
+      else if (message.type === 'error') p.reject(new Error(message.fatal ? BROKEN : message.message))
       else if (message.type === 'cancelled') p.reject(new DOMException('中止しました', 'AbortError'))
       else p.resolve(message)
     }
@@ -90,11 +104,68 @@ export function loadSkills(): Promise<SkillInfo[]> {
   return start()
 }
 
-/** 写真を読む。位置合わせ後の画面は PNG の Blob (撮り直しなら null) */
-export async function readPhoto(file: Blob): Promise<{ result: ReadResult; aligned: Blob | null }> {
-  const r = await call({ type: 'read', file })
-  if (r.type !== 'read') throw new Error('読み取りの応答が不正')
-  return { result: r.result, aligned: r.aligned }
+/** ページ側で写真を開いて画素にする。Worker の createImageBitmap で開けない形式 (iPad の HEIC など) でも、
+ * ブラウザが <img> で表示できるなら開ける */
+async function decodeWithImg(file: Blob): Promise<ImageData> {
+  const url = URL.createObjectURL(file)
+  try {
+    const img = new Image()
+    img.src = url
+    await img.decode()
+    const canvas = document.createElement('canvas')
+    canvas.width = img.naturalWidth
+    canvas.height = img.naturalHeight
+    const context = canvas.getContext('2d')
+    if (!context) throw new Error('canvas の 2d が使えない')
+    context.drawImage(img, 0, 0)
+    return context.getImageData(0, 0, canvas.width, canvas.height)
+  } finally {
+    URL.revokeObjectURL(url)
+  }
+}
+
+const describe = (e: unknown) => (e instanceof Error ? `${e.name}: ${e.message}` : String(e))
+
+/** 写真を読む。位置合わせ後の画面は PNG の Blob (撮り直しなら null)。
+ * onDebug には、成功しても失敗しても、写真の開き方と各段階の時間が届く (一時的なデバッグ用) */
+export async function readPhoto(
+  file: File,
+  onDebug?: (debug: PhotoDebug) => void,
+): Promise<{ result: ReadResult; aligned: Blob | null }> {
+  const t0 = performance.now()
+  const debug: PhotoDebug = { name: file.name, type: file.type, size: file.size, attempts: [], totalMs: 0 }
+  const done = () => onDebug?.({ ...debug, totalMs: performance.now() - t0 })
+  try {
+    let r: WorkerResponse
+    try {
+      r = await call({ type: 'read', input: file })
+      debug.attempts.push({ method: 'worker createImageBitmap', ok: true })
+    } catch (e) {
+      if (!(e instanceof DecodeFailure)) throw e
+      debug.attempts.push({ method: 'worker createImageBitmap', ok: false, ms: e.ms, detail: e.detail })
+      // Worker で開けなければ、ページ側の <img> で開き直す
+      const t = performance.now()
+      let image: ImageData
+      try {
+        image = await decodeWithImg(file)
+      } catch (e2) {
+        debug.attempts.push({ method: 'page <img>', ok: false, ms: performance.now() - t, detail: describe(e2) })
+        throw new Error(e.message)
+      }
+      debug.attempts.push({ method: 'page <img>', ok: true, ms: performance.now() - t })
+      r = await call({ type: 'read', input: image })
+    }
+    if (r.type !== 'read') throw new Error('読み取りの応答が不正')
+    debug.worker = r.debug
+    debug.timings = r.result.timings
+    debug.result = r.result.kind === 'read' ? 'read' : `rejected (${r.result.reason})`
+    return { result: r.result, aligned: r.aligned }
+  } catch (e) {
+    debug.error = describe(e)
+    throw e
+  } finally {
+    done()
+  }
 }
 
 /** 錬金時のフレームを探す。onProgress に進み具合 (探し終えたフレームの数, 全体) が届く。signal で中止できる

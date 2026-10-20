@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { AlertCircleIcon, CameraIcon, ImageIcon, LoaderCircleIcon, SearchIcon, ShieldCheckIcon } from 'lucide-react'
 
 import { CharmForm } from '@/components/charm-form'
+import { DebugPanel } from '@/components/debug-panel'
 import { FrameResults } from '@/components/frame-results'
 import { PhotoDropzone } from '@/components/photo-dropzone'
 import { AlignedScreen, ScreenPlaceholder } from '@/components/photo-review'
@@ -12,6 +13,7 @@ import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
 import { isComplete, type Draft, type FieldName, type Unsure } from '@/lib/draft'
 import { detectCapabilities } from '@/lib/capabilities'
+import { DEBUG, type PhotoDebug, type SearchDebug } from '@/lib/debug'
 import { useWindowFileDrop } from '@/lib/drop'
 import { parseFrame } from '@/lib/frame'
 import { formatBytes, hasFinePointer } from '@/lib/pointer'
@@ -67,6 +69,9 @@ export default function App() {
   /** マカフシギ錬金で出るスキルとポイントの範囲 (wasm から。読み込みは軽く、重い準備は最初の読み取りで行う) */
   const [skills, setSkills] = useState<SkillInfo[] | null>(null)
   const [error, setError] = useState<string | null>(null)
+  /** 一時的なデバッグ (?debug のときだけ使う)。新しい順に 5 回分 */
+  const [photoDebugs, setPhotoDebugs] = useState<PhotoDebug[]>([])
+  const [searchDebugs, setSearchDebugs] = useState<SearchDebug[]>([])
 
   /** ブラウザが必要な機能 (WebAssembly の SIMD など) を備えているか。足りなければ wasm を読み込まない */
   const capabilities = useMemo(() => detectCapabilities(), [])
@@ -119,7 +124,10 @@ export default function App() {
     setAligned(null)
     setError(null)
     try {
-      const { result, aligned: screen } = await readPhoto(file)
+      const { result, aligned: screen } = await readPhoto(
+        file,
+        DEBUG ? (d) => setPhotoDebugs((list) => [d, ...list].slice(0, 5)) : undefined,
+      )
       if (id !== readId.current) return
       show(result, screen && URL.createObjectURL(screen))
     } catch (e) {
@@ -191,15 +199,25 @@ export default function App() {
       pts2: draft.skill2 === null ? null : draft.pts2,
       slots: draft.slots!,
     }
+    const t0 = performance.now()
+    let searched = 0
+    const record = (found: number, cancelled: boolean) =>
+      DEBUG &&
+      setSearchDebugs((list) => [{ frames: searched, ms: performance.now() - t0, found, cancelled }, ...list].slice(0, 5))
     try {
       const list = await searchFrames(charm, draft.index, start!, end!, {
-        onProgress: (done, total) => setProgress(done / total),
+        onProgress: (done, total) => {
+          searched = done
+          setProgress(done / total)
+        },
         signal: controller.signal,
       })
+      record(list.length, false)
       setFound({ list, indexKnown: draft.index !== null })
     } catch (e) {
       // 中止したときは何も出さない
       if ((e as Error).name !== 'AbortError') setError((e as Error).message)
+      else record(0, true)
     } finally {
       setSearching(false)
       abort.current = null
@@ -213,7 +231,13 @@ export default function App() {
           {/* ファビコンと同じアイコンを添えて、兄弟ツール (mhxx-combo-scan) と見分けやすくする */}
           <h1 className="flex items-center gap-3">
             <img src={`${import.meta.env.BASE_URL}favicon.svg`} alt="" className="size-9 shrink-0 sm:size-10" />
-            MHXX 鑑定スキャン
+            {/* 狭い幅で入りきらないときは、バージョンだけが次の行に回る */}
+            <span>
+              MHXX 鑑定スキャン{' '}
+              <span className="text-base font-normal whitespace-nowrap text-muted-foreground tabular-nums sm:text-lg">
+                v{__APP_VERSION__}
+              </span>
+            </span>
           </h1>
           <p className="text-sm text-muted-foreground sm:text-base">鑑定画面の写真から、錬金時のフレームを特定します</p>
         </div>
@@ -342,6 +366,8 @@ export default function App() {
           <FrameResults key={found.list.length} found={found.list} indexKnown={found.indexKnown} />
         )}
       </div>
+
+      {DEBUG && <DebugPanel photos={photoDebugs} searches={searchDebugs} />}
     </main>
   )
 }
