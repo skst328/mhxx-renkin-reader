@@ -1,10 +1,8 @@
 # mhxx-renkin-reader
 
-MHXX の錬金結果の鑑定画面を写真から読み取って錬金時のフレームを推定するブラウザ向けのツール (作成中)。
+MHXX の錬金結果の鑑定画面を写真から読み取って錬金時のフレームを推定するブラウザ向けのツール。
 
 **公開ページ**: <https://skst328.github.io/mhxx-renkin-reader/>
-
-**デバッグ用**: <https://skst328.github.io/mhxx-renkin-reader/?debug> (ページの下に読み取りの各段階の時間と、写真の開き方が出る。公開前の確認用)
 
 - 画像の読み取りは Rust (WebAssembly) で、`renkin-reader/` にある。ビルドとテストは [renkin-reader/README.md](renkin-reader/README.md) を参照
 

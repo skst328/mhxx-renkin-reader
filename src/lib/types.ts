@@ -9,5 +9,4 @@ export type {
   ReadResult,
   RejectReason,
   SkillInfo,
-  Timing,
 } from '../../renkin-reader/pkg/renkin_reader.js'
