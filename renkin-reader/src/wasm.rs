@@ -1,10 +1,8 @@
 //! ブラウザ (TypeScript) から呼ぶ入口。本体を呼んで、結果を JS のオブジェクトに変えるだけ
 
-use serde::Serialize;
-use tsify::Tsify;
 use wasm_bindgen::prelude::*;
 
-use crate::types::{Charm, ReadResult, SkillId};
+use crate::types::{Charm, ReadResult};
 
 #[wasm_bindgen(js_name = Reader)]
 pub struct WasmReader(crate::Reader);
@@ -35,20 +33,10 @@ impl WasmReader {
     }
 }
 
-#[derive(Serialize, Tsify)]
-pub struct SkillEntry {
-    pub id: SkillId,
-    pub name: &'static str,
-}
-
-/// マカフシギ錬金で出るスキルの番号と表示名 (番号の小さい順)
-#[wasm_bindgen(unchecked_return_type = "SkillEntry[]")]
+/// マカフシギ錬金で出るスキルと、第 1・第 2 スキルとしてのポイントの範囲 (番号の小さい順)
+#[wasm_bindgen(unchecked_return_type = "SkillInfo[]")]
 pub fn skills() -> Result<JsValue, JsError> {
-    let list: Vec<SkillEntry> = crate::skills()
-        .iter()
-        .map(|&(id, name)| SkillEntry { id, name })
-        .collect();
-    Ok(serde_wasm_bindgen::to_value(&list)?)
+    Ok(serde_wasm_bindgen::to_value(&crate::skill_info())?)
 }
 
 /// [start, end) のフレームのうち、charm が (index があればその何個目に) 出るものを、何個目に出るかと一緒に返す。

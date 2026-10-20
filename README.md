@@ -4,6 +4,17 @@ MHXX の錬金結果の鑑定画面を写真から読み取って錬金時のフ
 
 - 画像の読み取りは Rust (WebAssembly) で、`renkin-reader/` にある。ビルドとテストは [renkin-reader/README.md](renkin-reader/README.md) を参照
 
+## 開発
+
+```sh
+pnpm install
+pnpm wasm   # renkin-reader/pkg/ (wasm と TypeScript の型) を作る。git 管理外なので、クローン直後と Rust を変えたあとに必ず実行する
+pnpm dev
+```
+
+`wasm-pack` が要る。読み取りとフレーム探索は Web Worker (`src/workers/reader.worker.ts`) の中で wasm を動かす。
+重い準備 (型紙の特徴点) は最初に写真を読むときに 1 回だけ行い、2 枚目以降は使い回す。
+
 ## ライセンス
 
 MIT License です。全文は [LICENSE](LICENSE) を参照してください。
@@ -13,10 +24,23 @@ MHXX のゲーム画面から作ったもので、MIT License の対象外です
 
 ### 使用しているソフトウェア
 
+配布物に含まれるもの (と、移植したアルゴリズム) と、そのライセンスです。
+
 | | ライセンス | 用途 |
 |---|---|---|
+| [React](https://react.dev/) | MIT | 画面 |
+| [Base UI](https://base-ui.com/) | MIT | UI 部品の土台 |
+| [shadcn/ui](https://ui.shadcn.com/) | MIT | UI 部品 |
+| [Tailwind CSS](https://tailwindcss.com/) / tw-animate-css | MIT | スタイル |
+| [class-variance-authority](https://cva.style/) | Apache-2.0 | スタイルの切り替え |
+| [Lucide](https://lucide.dev/) | ISC | アイコン |
+| [Geist](https://vercel.com/font) | **OFL-1.1** | フォント |
+| [wasm-bindgen](https://github.com/wasm-bindgen/wasm-bindgen) / serde / [tsify](https://github.com/madonoharu/tsify) ほか | MIT または Apache-2.0 | Rust から WebAssembly への橋渡し |
 | [OpenCV](https://github.com/opencv/opencv) | Apache-2.0 | 画像処理 (位置合わせ・読み取り) のアルゴリズム |
 | [apmnnn/mhxx-rng](https://github.com/apmnnn/mhxx-rng) | MIT | 乱数と護石の決まり方 (フレームの探索) |
+
+**Geist** は SIL Open Font License 1.1 です。ライセンス全文は
+<https://github.com/vercel/geist-font> に含まれています。
 
 **OpenCV** の処理を、結果が一致するように Rust で書き直したコード (`renkin-reader/src/vision/cv/` の各ファイル) を含みます。
 該当するファイルには冒頭にその旨を記載しています。ライセンス全文と著作権表示は

@@ -13,7 +13,7 @@ mod xorshift;
 use charm::{Generated, Table, WEATHERED, WORN};
 use xorshift::{SEED, ascend, descend, jump};
 
-use crate::types::{Charm, FrameCandidate, InputError};
+use crate::types::{Charm, FrameCandidate, InputError, PointRange, SkillInfo, union_range};
 
 /// 1 回の錬金で出る護石の種類の数 (投入は最高ランク): 風化 (乱数 % 1 + 2 個)、古びた (乱数 % 2 + 1 個)。
 /// mhxx-rng の juju_colors の rank 4 の値 (幅, 最小)
@@ -119,6 +119,45 @@ impl Quick {
             loc2,
         })
     }
+}
+
+/// マカフシギ錬金で出るスキルと、第 1・第 2 スキルとしてのポイントの範囲 (スキル番号の小さい順)。
+/// 錬金の表 (風化した護石と古びた護石) から求める。フレームの探索と同じ表なので、画面の選択肢と食い違わない
+pub fn skill_info() -> Vec<SkillInfo> {
+    crate::skills()
+        .iter()
+        .map(|&(id, name)| {
+            let mut skill1 = None;
+            let mut skill2 = None;
+            for t in [&WEATHERED, &WORN] {
+                if let Some(i) = t.skill1.iter().position(|&s| s == id) {
+                    let (lo, hi) = t.pts1[i];
+                    skill1 = union_range(
+                        skill1,
+                        Some(PointRange {
+                            min: lo as i8,
+                            max: hi as i8,
+                        }),
+                    );
+                }
+                if let Some(i) = t.skill2.iter().position(|&s| s == id) {
+                    skill2 = union_range(
+                        skill2,
+                        Some(PointRange {
+                            min: 1,
+                            max: t.pts2[i].1 as i8,
+                        }),
+                    );
+                }
+            }
+            SkillInfo {
+                id,
+                name,
+                skill1,
+                skill2,
+            }
+        })
+        .collect()
 }
 
 /// [start, end) のフレームのうち、charm が (index があればその何個目に) 出るものを、何個目に出るかと一緒に返す
@@ -481,6 +520,32 @@ mod tests {
                 none,
                 "何個目 {index}"
             );
+        }
+    }
+
+    /// スキルごとのポイントの範囲: どのスキルも第 1 か第 2 のどちらかにはなれ、錬金の結果 (526 個の護石) の
+    /// ポイントはどれも範囲に入る。例として、ガード性能の第 1 スキルは、風化した護石の 3〜7 と古びた護石の 1〜6 を合わせた 1〜7
+    #[test]
+    fn skill_ranges_cover_generated_charms() {
+        let info = skill_info();
+        assert_eq!(info.len(), crate::skills().len());
+        assert!(
+            info.iter()
+                .all(|s| s.skill1.is_some() || s.skill2.is_some())
+        );
+        let by_id = |id: u16| info.iter().find(|s| s.id == id).unwrap();
+        assert_eq!(by_id(84).skill1, Some(PointRange { min: 1, max: 7 }));
+        let f = json_fixture("rng/melding.json");
+        for m in f["meldings"].as_array().unwrap() {
+            for c in m["charms"].as_array().unwrap() {
+                let n = |i: usize| c[i].as_i64().unwrap();
+                let s1 = by_id(n(1) as u16);
+                assert!(s1.skill1.is_some_and(|r| r.contains(n(2) as i8)), "{c}");
+                if n(3) >= 0 {
+                    let s2 = by_id(n(3) as u16);
+                    assert!(s2.skill2.is_some_and(|r| r.contains(n(4) as i8)), "{c}");
+                }
+            }
         }
     }
 

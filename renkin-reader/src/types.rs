@@ -151,6 +151,50 @@ pub struct Charm {
     pub slots: u8,
 }
 
+/// マカフシギ錬金で出るスキルと、そのポイントの範囲 (画面の選択肢に使う)。範囲は錬金の表 (風化した護石と
+/// 古びた護石) を合わせたもので、そのスキルになれない欄は null
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[cfg_attr(all(target_arch = "wasm32", target_os = "unknown"), derive(Tsify))]
+pub struct SkillInfo {
+    pub id: SkillId,
+    /// 鑑定画面の表記
+    pub name: &'static str,
+    /// 第 1 スキルとしてのポイントの範囲
+    pub skill1: Option<PointRange>,
+    /// 第 2 スキルとしてのポイントの範囲 (錬金ではマイナスは出ないので 1 から)
+    pub skill2: Option<PointRange>,
+}
+
+/// ポイントの範囲 (両端を含む)
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[cfg_attr(all(target_arch = "wasm32", target_os = "unknown"), derive(Tsify))]
+pub struct PointRange {
+    pub min: i8,
+    pub max: i8,
+}
+
+impl PointRange {
+    pub fn contains(&self, p: i8) -> bool {
+        (self.min..=self.max).contains(&p)
+    }
+
+    /// 2 つの範囲を合わせた範囲
+    fn union(self, o: Self) -> Self {
+        Self {
+            min: self.min.min(o.min),
+            max: self.max.max(o.max),
+        }
+    }
+}
+
+/// 範囲を合わせる (片方が無ければもう片方)
+pub(crate) fn union_range(a: Option<PointRange>, b: Option<PointRange>) -> Option<PointRange> {
+    match (a, b) {
+        (Some(a), Some(b)) => Some(a.union(b)),
+        (a, b) => a.or(b),
+    }
+}
+
 /// フレームの探索の結果の 1 件: そのフレームで錬金すると、探した護石が何個目に出るか
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[cfg_attr(all(target_arch = "wasm32", target_os = "unknown"), derive(Tsify))]

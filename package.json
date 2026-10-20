@@ -4,6 +4,7 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
+    "wasm": "wasm-pack build renkin-reader --target web",
     "dev": "vite",
     "build": "tsc -b && vite build",
     "lint": "oxlint",

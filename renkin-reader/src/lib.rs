@@ -13,7 +13,7 @@ mod vision;
 #[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
 mod wasm;
 
-pub use rng::search_frames;
+pub use rng::{search_frames, skill_info};
 pub use types::*;
 pub use vision::{Reader, SCREEN_HEIGHT, SCREEN_WIDTH};
 
