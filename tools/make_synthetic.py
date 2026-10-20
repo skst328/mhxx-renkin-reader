@@ -4,6 +4,7 @@ charm-pics の Switch のキャプチャ (ゲーム画面だけ。templates/ の
 JPEG などの劣化を加えて、スマホで撮った写真の代わりにする。写真そのものは使わないので、できた画像はリポジトリに入れる
 (リポジトリ単体で写真から最後まで読むテストができる)。答え (answers.csv) はキャプチャの答えから写し、
 スロットと何個目かは、劣化させる前のキャプチャを Python 版で読んだ値にする。
+読める画像ごとに、錬金したフレームの候補 (frames.json) も書く (読み取りからフレーム探索までのテスト用)。
 
 作るときには charm-pics と、OpenCV の入った Python (experimental-charm-reader の venv など) が要る。
 作ったあと、Python 版 (python -m charm_reader.evaluate renkin-reader/tests/synthetic) でも期待どおりか確かめる。
@@ -11,6 +12,7 @@ JPEG などの劣化を加えて、スマホで撮った写真の代わりにす
 usage: python tools/make_synthetic.py [charm-pics のディレクトリ]
 """
 import csv
+import json
 import sys
 from pathlib import Path
 
@@ -123,6 +125,36 @@ def render(capture, p, rng):
     return np.ascontiguousarray(img)
 
 
+# 読み取りからフレーム探索までのテストで、フレームを探す範囲 [開始, 終了)
+FRAME_RANGE = (0, 1_000_000)
+
+
+def frames(rows):
+    """読める画像ごとに、正解の護石と何個目から、錬金したフレームの候補 (Python 版の frames.py) を frames.json に書く.
+
+    素材の 4 枚は 1 回のマカフシギ錬金の 1〜4 個目なので、4 個の候補に共通するフレームがその錬金のフレーム
+    (383346。mhxx-rng で錬金した結果がキャプチャと並びまで一致する)。それも書いておく。
+    素材を変えてクエスト報酬などの護石を使うと、候補が無くなることがあるので注意。
+    """
+    import re
+    from charm_reader import frames as F
+    skills = {name: int(i) for i, name in re.findall(r'\((\d+), "([^"]+)"\)',
+                                                     (ROOT / "renkin-reader" / "src" / "skills.rs").read_text())}
+    out = {"start": FRAME_RANGE[0], "end": FRAME_RANGE[1], "images": {}}
+    for r in rows:
+        if r["expect"] == "retake":
+            continue
+        charm = (skills[r["skill1"]], int(r["pts1"]), skills[r["skill2"]] if r["skill2"] else -1,
+                 int(r["pts2"] or 0), int(r["slot"]))
+        hits = F.candidate_frames(charm, int(r["index"]), FRAME_RANGE)
+        out["images"][r["file"]] = sorted({f for f, _ in hits})
+    common = set.intersection(*(set(v) for v in out["images"].values()))
+    assert len(common) == 1, common
+    out["melding"] = common.pop()
+    (OUT / "frames.json").write_text(json.dumps(out, indent=1) + "\n")
+    print(f"錬金したフレーム {out['melding']}、候補の数 {[len(v) for v in out['images'].values()]}")
+
+
 def main(charm_pics):
     templates = Path(charm_pics) / "templates"
     with open(templates / "answers.csv", newline="") as f:
@@ -155,6 +187,7 @@ def main(charm_pics):
         wr = csv.DictWriter(f, fieldnames=["file", "index", "skill1", "pts1", "skill2", "pts2", "slot", "expect", "note"])
         wr.writeheader()
         wr.writerows(rows)
+    frames(rows)
     total = sum((OUT / r["file"]).stat().st_size for r in rows)
     print(f"{len(rows)} 枚を {OUT} に書いた (合計 {total / 1e6:.1f} MB)")
 

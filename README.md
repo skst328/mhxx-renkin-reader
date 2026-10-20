@@ -16,7 +16,11 @@ MHXX のゲーム画面から作ったもので、MIT License の対象外です
 | | ライセンス | 用途 |
 |---|---|---|
 | [OpenCV](https://github.com/opencv/opencv) | Apache-2.0 | 画像処理 (位置合わせ・読み取り) のアルゴリズム |
+| [apmnnn/mhxx-rng](https://github.com/apmnnn/mhxx-rng) | MIT | 乱数と護石の決まり方 (フレームの探索) |
 
 **OpenCV** の処理を、結果が一致するように Rust で書き直したコード (`renkin-reader/src/vision/cv/` の各ファイル) を含みます。
 該当するファイルには冒頭にその旨を記載しています。ライセンス全文と著作権表示は
 [THIRD_PARTY_LICENSES/OpenCV](THIRD_PARTY_LICENSES/OpenCV) にあります。
+
+**乱数と護石の決まり方** (`renkin-reader/src/rng.rs`、`renkin-reader/src/rng/`) は apmnnn 氏の mhxx-rng からの移植です。
+MIT ライセンスの全文は `renkin-reader/src/rng/xorshift.rs` の冒頭に記載しています。

@@ -20,12 +20,16 @@ MHXX の錬金結果の鑑定画面を写真から読む Rust のクレート。
 | 見本の下ごしらえが Python 版と同じ | `src/vision/read.rs` | `tests/fixtures/read/` |
 | 型紙の SIFT が NumPy 版と bit-exact、OpenCV と特徴点が全部・記述子が 1402 / 1415 同じ | `src/vision/cv/sift.rs` | `tests/fixtures/sift/` |
 | RANSAC と最小二乗がインライアの判定まで NumPy 版と同じ | `src/vision/cv/ransac.rs` | `tests/fixtures/cv/ransac.json` |
+| 錬金で出る護石とフレームの探索が mhxx-rng (ノートブック) と同じ (2 種類の表の全スキルを最低 1 回通す)。探索は 1 フレームずつ素直に作ったものとも同じ。mhxx-rng の「有名なお守り」6 個を 0〜10 億フレームで探して、Python 版と同じで当たりフレームの数も一覧と同じ (これだけで 20 秒ほど) | `src/rng.rs` | `tests/fixtures/rng/` |
 | 人工の写真 12 枚を写真から最後まで読んで、期待どおり (読める 10 枚、撮り直し 2 枚) | `tests/synthetic.rs` | `tests/synthetic/answers.csv` |
+| 読み取りからフレーム探索まで: 読める 10 枚を読み、読んだ護石と何個目でフレーム (0〜100 万) を探して、候補が期待どおり。素材の 4 枚は 1 回のマカフシギ錬金の 1〜4 個目なので、全部の候補に共通するのはその錬金のフレーム 383346 だけ (mhxx-rng で錬金した結果がキャプチャと並びまで一致する) | `tests/synthetic.rs` | `tests/synthetic/frames.json` |
 | そのほか (埋め込んだ見本、スキル表、入力の長さ、ぼかしの足し算の順番、記述子の距離の SIMD 版) | 各ファイル | — |
 
 正解の作り方 (OpenCV の入った Python で動かす。experimental-charm-reader の venv など):
 
-- `tests/fixtures/`: `python tools/make_fixtures.py`。入力は乱数の小さな画像と見本 (`assets/`) と人工の写真で、写真は使わない
+- `tests/fixtures/`: `python tools/make_fixtures.py`。入力は乱数の小さな画像と見本 (`assets/`) と人工の写真で、写真は使わない。
+  `tests/fixtures/rng/` は mhxx-rng のノートブック (リポジトリの隣に clone した mhxx-rng。experimental-charm-reader の
+  charm_reader/mhxx_rng.py を参照) と numba も要る
 - `tests/synthetic/`: `python tools/make_synthetic.py`。charm-pics のキャプチャ (鑑定画面のゲーム画面だけ) を部屋の写真の中に斜めに置き、ボケ・ノイズ・JPEG・反射・左右反転などを加えたもの。何度作っても同じ画像になる。作ったら Python 版でも期待どおりか確かめる (`python -m charm_reader.evaluate <このディレクトリ>/tests/synthetic`)
 
 ### charm-pics を使うもの (`--ignored`)

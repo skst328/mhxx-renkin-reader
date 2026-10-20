@@ -51,13 +51,15 @@ pub fn skills() -> Result<JsValue, JsError> {
     Ok(serde_wasm_bindgen::to_value(&list)?)
 }
 
-/// [start, end) のフレームのうち、charm が (index があればその何個目に) 出るもの
-#[wasm_bindgen(js_name = searchFrames)]
+/// [start, end) のフレームのうち、charm が (index があればその何個目に) 出るものを、何個目に出るかと一緒に返す。
+/// index が 5 以上 (鑑定ボックスに何回分もの錬金の護石が並んでいるとき) は、何個目の指定なしとして探す
+#[wasm_bindgen(js_name = searchFrames, unchecked_return_type = "FrameCandidate[]")]
 pub fn search_frames(
     charm: Charm,
     index: Option<u8>,
     start: u32,
     end: u32,
-) -> Result<Vec<u32>, JsError> {
-    Ok(crate::search_frames(&charm, index, start, end)?)
+) -> Result<JsValue, JsError> {
+    let found = crate::search_frames(&charm, index, start, end)?;
+    Ok(serde_wasm_bindgen::to_value(&found)?)
 }

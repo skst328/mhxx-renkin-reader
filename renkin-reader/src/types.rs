@@ -151,6 +151,15 @@ pub struct Charm {
     pub slots: u8,
 }
 
+/// フレームの探索の結果の 1 件: そのフレームで錬金すると、探した護石が何個目に出るか
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[cfg_attr(all(target_arch = "wasm32", target_os = "unknown"), derive(Tsify))]
+pub struct FrameCandidate {
+    pub frame: u32,
+    /// 何個目か (1 から、小さい順)。同じ中身の護石が 1 回の錬金で 2 か所に出ることもあるので一覧
+    pub indexes: Vec<u8>,
+}
+
 /// 入力の誤り (呼び出し側のバグ)。読み取りの失敗は ReadResult::Rejected で返し、これは使わない
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum InputError {

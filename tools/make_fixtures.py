@@ -236,6 +236,123 @@ def ransac():
     _save("ransac", out)
 
 
+def _grouped(hits):
+    """frames.py の [(フレーム, 何個目), ...] を、フレームごとの [フレーム, [何個目, ...]] にする (小さい順)."""
+    out = {}
+    for f, i in sorted(set(hits)):
+        out.setdefault(f, []).append(i)
+    return [[f, v] for f, v in out.items()]
+
+
+def melding():
+    """マカフシギ錬金 (最高ランク) で出る護石と、フレームの探索の結果 (mhxx-rng のノートブックと、それを使う
+    experimental-charm-reader の frames.py)。mhxx-rng を clone しておく (charm_reader.mhxx_rng を参照)."""
+    from charm_reader import frames as F
+    ns = F.ns
+    rng = np.random.default_rng(9)
+    frame_list = [0, 1, 2, 3, 99_999_999] + sorted(int(f) for f in rng.integers(4, 100_000_000, 60))
+    kinds = (ns["set_blue"], ns["set_red"])
+
+    def meld(f):
+        # mhxx-rng の meldingpush と同じ手順 (表示の代わりに中身を集める)
+        ns["jump"](f - 1)
+        order = ns["juju_colors"](ns["r0"], 4)
+        ns["roll"]()
+        charms = []
+        for k in order:
+            kinds[k]()
+            c = ns["getcharm"](0)
+            charms.append([k, c[0], c[1], c[2], c[3], c[4]])
+            for _ in range(4 if ns["r2"] % 100 < ns["th"] else 6):
+                ns["roll"]()
+        return {"frame": f, "charms": charms}
+
+    meldings = [meld(f) for f in frame_list]
+    # 探索: 上で作った護石のいくつかを、鑑定画面での見え方 (第 1 スキルと同じ第 2 スキルは無し) にして探す
+    searches = []
+    lo, hi = 0, 3_000_000
+    picks = [(m, j) for m in meldings[5:13] for j in range(len(m["charms"]))][::3]
+    for m, j in picks:
+        k, s1, p1, s2, p2, slot = m["charms"][j]
+        shown = s2 >= 0 and s2 != s1 and p2 > 0
+        charm = (s1, p1, s2 if shown else -1, p2 if shown else 0, slot)
+        for index in (None, j + 1):
+            hits = F.candidate_frames(charm, index, (lo, hi))
+            searches.append({"charm": list(charm), "index": index, "start": lo, "end": hi,
+                             "found": _grouped(hits)})
+    # 錬金では出ないスキル (1 = 錬金の表に無い) と、範囲の端 (開始 0 の直後に出るもの)
+    searches.append({"charm": [1, 3, -1, 0, 1], "index": None, "start": 0, "end": 1000, "found": []})
+    k, s1, p1, s2, p2, slot = meldings[0]["charms"][0]
+    shown = s2 >= 0 and s2 != s1 and p2 > 0
+    charm = (s1, p1, s2 if shown else -1, p2 if shown else 0, slot)
+    searches.append({"charm": list(charm), "index": 1, "start": 0, "end": 10,
+                     "found": _grouped(F.candidate_frames(charm, 1, (0, 10)))})
+    # 第 2 スキルが第 1 スキルと同じ護石 (画面では第 2 スキルなしに見える) を、それが出たフレームを含む範囲で探す
+    m, j = next((m, j) for m in meldings for j, c in enumerate(m["charms"]) if c[3] == c[1])
+    k, s1, p1, s2, p2, slot = m["charms"][j]
+    charm = (s1, p1, -1, 0, slot)
+    lo, hi = m["frame"] - 100_000, m["frame"] + 100_000
+    for index in (None, j + 1):
+        hits = F.candidate_frames(charm, index, (lo, hi))
+        assert m["frame"] in {f for f, _ in hits}
+        searches.append({"charm": list(charm), "index": index, "start": lo, "end": hi,
+                         "found": _grouped(hits)})
+    # 網羅: 2 種類の表の第 1 スキルと第 2 スキルが、どれも最低 1 回は護石に出るように、フレームを順に見て
+    # まだ出ていないスキルが出るフレームを足す。足したフレームで新しく出た護石は、探索でも 1 回ずつ探す
+    seen = set()  # (種類, 1 か 2, スキル番号)
+    for m in meldings:
+        for k, s1, _, s2, _, _ in m["charms"]:
+            seen |= {(k, 1, s1)} | ({(k, 2, s2)} if s2 >= 0 else set())
+    need = set()
+    for k in (0, 1):
+        kinds[k]()
+        need |= {(k, 1, v) for v in ns["skill1"]} | {(k, 2, v) for v in ns["skill2"]}
+    f = 10_000_000
+    while not need <= seen:
+        m = meld(f)
+        new = [j for j, (k, s1, _, s2, _, _) in enumerate(m["charms"])
+               if (k, 1, s1) not in seen or (s2 >= 0 and (k, 2, s2) not in seen)]
+        if new:
+            meldings.append(m)
+            for j in new:
+                k, s1, p1, s2, p2, slot = m["charms"][j]
+                seen |= {(k, 1, s1)} | ({(k, 2, s2)} if s2 >= 0 else set())
+                shown = s2 >= 0 and s2 != s1 and p2 > 0
+                charm = (s1, p1, s2 if shown else -1, p2 if shown else 0, slot)
+                hits = F.candidate_frames(charm, j + 1, (f - 2000, f + 2000))
+                searches.append({"charm": list(charm), "index": j + 1, "start": f - 2000, "end": f + 2000,
+                                 "found": _grouped(hits)})
+        f += 1
+    print(f"網羅のために足したフレーム {len(meldings) - len(frame_list)} 個 (10,000,000〜{f - 1} を見た)")
+    out = FIXTURES / "rng"
+    out.mkdir(parents=True, exist_ok=True)
+    (out / "melding.json").write_text(json.dumps({"meldings": meldings, "searches": searches}) + "\n")
+
+
+def famous():
+    """mhxx-rng の「有名なお守り」(docs/charms.md) のいくつかを、0〜10 億フレームで探した結果 (frames.py)。
+    一覧のフレーム (護石が始まる位置) と当たりフレームの数 (その位置を通る錬金のフレームの数) も書いておき、
+    Rust 側で照らし合わせる。1 件 40〜50 秒かかる."""
+    import re
+    from charm_reader import frames as F
+    pick = {1716, 62669, 310605, 398518, 15069320, 58161487}  # 種類・スロット・深さがばらけるように選んだもの
+    names = F.ns["skill"]  # mhxx-rng の略称
+    doc = (EXPERIMENTAL.parent / "mhxx-rng" / "docs" / "charms.md").read_text(encoding="utf-8")
+    out = []
+    for line in doc.splitlines():
+        m = re.match(r"\| (\d+) \| (\S+?)(-?\d+) (?:(\S+?)(-?\d+) )?S(\d) \| [^|]+ \| (\d+) \|", line)
+        if not m or int(m[1]) not in pick:
+            continue
+        frame, a, p, b, q, slot, hits = m.groups()
+        charm = (names.index(a), int(p), names.index(b) if b else -1, int(q) if q else 0, int(slot))
+        found = F.candidate_frames(charm, None, (0, 1_000_000_000))
+        out.append({"name": f"{a}{p} {b or ''}{q or ''} S{slot}", "charm": list(charm), "frame": int(frame),
+                    "hits": int(hits), "frames": sorted({f for f, _ in found})})
+        print(out[-1]["name"], len(out[-1]["frames"]), flush=True)
+    assert len(out) == len(pick)
+    (FIXTURES / "rng" / "famous.json").write_text(json.dumps(out, ensure_ascii=False) + "\n")
+
+
 if __name__ == "__main__":
     load()
     color()
@@ -250,3 +367,5 @@ if __name__ == "__main__":
     align_ops()
     sift()
     ransac()
+    melding()
+    famous()
