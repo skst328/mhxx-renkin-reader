@@ -97,9 +97,36 @@ pub struct Aligned {
     pub diagnostics: Diagnostics,
 }
 
+/// 型紙 (assets/reference.png) の SIFT の特徴点の位置と記述子を、あらかじめ求めて埋め込んだもの。
+/// 起動のたびに型紙の SIFT を求めると重い (準備の 9 割) ので、求めた結果だけを持つ。今の SIFT で型紙から求めたものと
+/// 同じかは、テストの reference_features_are_up_to_date が確かめる (SIFT や型紙を変えたら、そこで作り直す)。
+/// 並び: 個数 (u32、リトルエンディアン)、そのあと 1 個ずつ x、y (f32、リトルエンディアン)、記述子 (128 バイト。
+/// SIFT の記述子の値は 0〜255 の整数なので、1 バイトずつで失われない)
+static REFERENCE_FEATURES: &[u8] = include_bytes!("../../assets/reference_features.bin");
+
+/// 埋め込んだ型紙の特徴点 (位置と記述子) を取り出す
+fn reference_features() -> (Vec<Point>, Vec<[f32; DESCRIPTOR_LEN]>) {
+    let n = u32::from_le_bytes(REFERENCE_FEATURES[..4].try_into().unwrap()) as usize;
+    let record = 8 + DESCRIPTOR_LEN;
+    assert_eq!(
+        REFERENCE_FEATURES.len(),
+        4 + n * record,
+        "型紙の特徴量の大きさが合わない"
+    );
+    REFERENCE_FEATURES[4..]
+        .chunks_exact(record)
+        .map(|r| {
+            let f = |i: usize| f32::from_le_bytes(r[i..i + 4].try_into().unwrap());
+            let des: [f32; DESCRIPTOR_LEN] = std::array::from_fn(|i| f32::from(r[8 + i]));
+            ([f(0), f(4)], des)
+        })
+        .unzip()
+}
+
 pub struct Aligner {
     sift: Sift,
-    ref_kps: Vec<KeyPoint>,
+    /// 型紙の特徴点の位置 (型紙 = 画面の座標) と記述子
+    ref_pts: Vec<Point>,
     ref_des: Vec<[f32; DESCRIPTOR_LEN]>,
     dot: Image<f32>,
 }
@@ -220,13 +247,12 @@ fn stack(a: &[Point], b: &[Point], n: usize) -> Vec<Point> {
 }
 
 impl Aligner {
-    /// 型紙の特徴点を求める (重い。一度だけ)
+    /// 埋め込んだ型紙の特徴点を取り出す
     pub fn new() -> Self {
-        let sift = Sift::new(SIFT_FEATURES);
-        let (ref_kps, ref_des) = sift.detect_and_compute(&assets::REFERENCE.image());
+        let (ref_pts, ref_des) = reference_features();
         Self {
-            sift,
-            ref_kps,
+            sift: Sift::new(SIFT_FEATURES),
+            ref_pts,
             ref_des,
             dot: assets::GRID_DOT.image().map(f32::from),
         }
@@ -342,10 +368,7 @@ impl Aligner {
             .iter()
             .map(|m| [kps[m.query].x, kps[m.query].y])
             .collect();
-        let dst: Vec<Point> = good
-            .iter()
-            .map(|m| [self.ref_kps[m.train].x, self.ref_kps[m.train].y])
-            .collect();
+        let dst: Vec<Point> = good.iter().map(|m| self.ref_pts[m.train]).collect();
         let Some((h, inl)) = time("align.ransac", || {
             find_homography(&src, &dst, Method::Ransac, 3.0)
         })
@@ -509,4 +532,50 @@ fn refine_with_corners(
         (h, cs, cd) = (h2, ps, pd);
     }
     (h, cs, cd)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::testutil::load_png_rgba;
+
+    /// 埋め込んだ型紙の特徴量 (REFERENCE_FEATURES) が、今の SIFT で型紙から求めたものとバイト単位で同じか。
+    /// SIFT や型紙を変えたら、`RENKIN_WRITE_REFERENCE=1 cargo test --release reference_features_are_up_to_date`
+    /// で assets/reference_features.bin を作り直す
+    #[test]
+    fn reference_features_are_up_to_date() {
+        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("assets");
+        let (rgba, w, h) = load_png_rgba(&dir.join("reference.png"));
+        let gray = Image::from_vec(
+            w as usize,
+            h as usize,
+            rgba.chunks(4).map(|p| p[0]).collect(),
+        );
+        let (kps, des) = Sift::new(SIFT_FEATURES).detect_and_compute(&gray);
+        let mut bytes = (kps.len() as u32).to_le_bytes().to_vec();
+        for (k, d) in kps.iter().zip(&des) {
+            bytes.extend(k.x.to_le_bytes());
+            bytes.extend(k.y.to_le_bytes());
+            for &v in d {
+                assert!(
+                    v.fract() == 0.0 && (0.0..=255.0).contains(&v),
+                    "記述子の値が 0〜255 の整数でない: {v}"
+                );
+                bytes.push(v as u8);
+            }
+        }
+        if std::env::var("RENKIN_WRITE_REFERENCE").is_ok() {
+            std::fs::write(dir.join("reference_features.bin"), &bytes).unwrap();
+            println!(
+                "assets/reference_features.bin を書き出した ({} 個、{} バイト)",
+                kps.len(),
+                bytes.len()
+            );
+            return;
+        }
+        assert!(
+            bytes == REFERENCE_FEATURES,
+            "埋め込んだ型紙の特徴量が、今の SIFT の結果と違う。RENKIN_WRITE_REFERENCE=1 を付けてこのテストを流し、作り直す"
+        );
+    }
 }

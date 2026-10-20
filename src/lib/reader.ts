@@ -1,5 +1,6 @@
 // ページ側から Worker (src/workers/reader.worker.ts) に読み取りとフレーム探索を頼む。
-// Worker はページを開いている間 1 つだけ。頼んだ順に 1 つずつ処理される
+// Worker は一度に 1 つだけで、頼んだ順に 1 つずつ処理される。ページが裏に回ってしばらく何もしていなければ捨て
+// (wasm のメモリは一度広がると縮まないので、Worker ごと返す)、次に頼んだときに作り直す
 import type { Charm, FrameCandidate, ReadResult, SkillInfo } from '../../renkin-reader/pkg/renkin_reader.js'
 import type { WorkerRequest, WorkerResponse } from '../workers/reader.worker'
 import workerUrl from '../workers/reader.worker.ts?worker&url'
@@ -16,6 +17,8 @@ type Pending = {
 
 let worker: Worker | null = null
 let skillsReady: Promise<SkillInfo[]> | null = null
+/** Worker の準備 (wasm の読み込み) が終わったか */
+let ready = false
 const pending = new Map<number, Pending>()
 let nextId = 1
 
@@ -27,9 +30,33 @@ function discard(error: Error) {
   worker?.terminate()
   worker = null
   skillsReady = null
+  ready = false
   for (const p of pending.values()) p.reject(error)
   pending.clear()
 }
+
+/** ページが裏に回ってから、この時間 (ミリ秒) 何もしていなければ Worker を捨てる。写真の選択画面を開いても
+ * ページは裏に回るので、すぐには捨てない (捨てても、作り直しは wasm の読み込みだけで軽い) */
+const RELEASE_AFTER_HIDDEN_MS = 10_000
+let releaseTimer: ReturnType<typeof setTimeout> | undefined
+
+/** 裏に回っていれば、しばらくしてから Worker を捨てる */
+function scheduleRelease() {
+  clearTimeout(releaseTimer)
+  if (document.visibilityState === 'hidden') releaseTimer = setTimeout(release, RELEASE_AFTER_HIDDEN_MS)
+}
+
+/** 何もしていなければ Worker を捨てて、wasm のメモリをブラウザに返す。読み取りや探索の途中と、準備の途中は捨てない
+ * (準備が終わるのを待っている頼みごとがあるため) */
+function release() {
+  if (!worker || !ready || pending.size > 0 || document.visibilityState !== 'hidden') return
+  worker.terminate()
+  worker = null
+  skillsReady = null
+  ready = false
+}
+
+document.addEventListener('visibilitychange', scheduleRelease)
 
 /** Worker を作る。本物の Worker のスクリプトを、blob: の小さな Worker から読み込む。
  * 公開版の外部通信の禁止 (index.html の meta の CSP、vite.config.ts) は、URL から作った Worker には効かない
@@ -50,7 +77,9 @@ function start(): Promise<SkillInfo[]> {
     worker.onmessage = (event: MessageEvent<WorkerResponse>) => {
       const message = event.data
       if (message.type === 'ready') {
+        ready = true
         resolveSkills(message.skills)
+        scheduleRelease()
         return
       }
       if (message.type === 'failed') {
@@ -66,6 +95,8 @@ function start(): Promise<SkillInfo[]> {
         return
       }
       pending.delete(message.id)
+      // 裏に回っている間に終わったら、そこから捨てるまでを数え直す
+      if (pending.size === 0) scheduleRelease()
       if (message.type === 'error' && message.fatal) discard(new Error(BROKEN))
       if (message.type === 'error') p.reject(new Error(message.fatal ? BROKEN : message.message))
       else if (message.type === 'cancelled') p.reject(new DOMException('中止しました', 'AbortError'))
@@ -98,7 +129,7 @@ function call(
   )
 }
 
-/** wasm を読み込み、マカフシギ錬金で出るスキルとポイントの範囲を返す (軽い。重い準備は最初の読み取りで行う) */
+/** wasm を読み込み、マカフシギ錬金で出るスキルとポイントの範囲を返す (読み取りの準備は最初の読み取りで行う) */
 export function loadSkills(): Promise<SkillInfo[]> {
   return start()
 }

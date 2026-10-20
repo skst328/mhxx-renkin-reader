@@ -64,7 +64,7 @@ export default function App() {
   const [searching, setSearching] = useState(false)
   const [found, setFound] = useState<{ list: FrameCandidate[]; indexKnown: boolean } | null>(null)
   const finePointer = useMemo(() => hasFinePointer(), [])
-  /** マカフシギ錬金で出るスキルとポイントの範囲 (wasm から。読み込みは軽く、重い準備は最初の読み取りで行う) */
+  /** マカフシギ錬金で出るスキルとポイントの範囲 (wasm から。読み取りの準備は最初の読み取りで行う) */
   const [skills, setSkills] = useState<SkillInfo[] | null>(null)
   const [error, setError] = useState<string | null>(null)
 

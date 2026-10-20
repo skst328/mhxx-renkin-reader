@@ -15,14 +15,15 @@ pnpm dev
 ```
 
 `wasm-pack` が要る。読み取りとフレーム探索は Web Worker (`src/workers/reader.worker.ts`) の中で wasm を動かす。
-重い準備 (型紙の特徴点) は最初に写真を読むときに 1 回だけ行い、2 枚目以降は使い回す。
+読み取りの準備 (埋め込んだ型紙の特徴点と見本の下ごしらえ) は最初に写真を読むときに 1 回だけ行い、2 枚目以降は使い回す。
+ページが裏に回って 10 秒ほど何もしていなければ Worker を捨てて wasm のメモリを返し、次に頼んだときに作り直す。
 
 ## ライセンス
 
 MIT License です。全文は [LICENSE](LICENSE) を参照してください。
 
-`renkin-reader/assets/` の画像 (ビルド時に埋め込まれる見本) と `renkin-reader/tests/synthetic/` の画像 (テスト用の人工の写真) は
-MHXX のゲーム画面から作ったもので、MIT License の対象外です (著作権は株式会社カプコンに帰属します)。
+`renkin-reader/assets/` の画像 (ビルド時に埋め込まれる見本) とそこから求めた型紙の特徴量 (`reference_features.bin`)、
+`renkin-reader/tests/synthetic/` の画像 (テスト用の人工の写真) は MHXX のゲーム画面から作ったもので、MIT License の対象外です (著作権は株式会社カプコンに帰属します)。
 
 ### 使用しているソフトウェア
 

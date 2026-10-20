@@ -4,6 +4,7 @@
 //! バイナリの中の位置) は Rust のソース (OUT_DIR/assets_index.rs) に書き出して include! で取り込む。
 //! 実行時に PNG を展開しないので、wasm に PNG の展開処理は入らない。見本の下ごしらえ (トップハットなど) は
 //! 実行時に本体の関数でやる (ここではしない)。
+//! 位置合わせの型紙 (reference.png) は画素ではなく、求めた特徴量 (assets/reference_features.bin) を本体が埋め込む
 
 use std::{env, fs, path::Path};
 
@@ -58,11 +59,7 @@ fn main() {
             entries.join(", ")
         ));
     }
-    for (name, file) in [
-        ("LABEL", "label.png"),
-        ("REFERENCE", "reference.png"),
-        ("GRID_DOT", "grid_dot.png"),
-    ] {
+    for (name, file) in [("LABEL", "label.png"), ("GRID_DOT", "grid_dot.png")] {
         index.push_str(&format!(
             "pub static {name}: Asset = {};\n",
             entry(&dir.join(file), &mut blob)

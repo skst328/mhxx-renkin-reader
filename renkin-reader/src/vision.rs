@@ -21,6 +21,8 @@ use crate::types::Timing;
 use crate::types::{Candidate, Diagnostics, Field, Fields, InputError, ReadResult, RejectReason};
 use align::Aligner;
 use cv::image::RgbaView;
+use cv::linalg::{Mat3, inv3};
+use cv::warp::transform_point;
 use read::{Scored, ScreenRead, Templates};
 
 /// 1 位の点数がこれ未満か、2 位との差がこれ未満なら、スキル名・数字は自信なし
@@ -37,6 +39,8 @@ pub struct Reader {
     init_timings: Vec<Timing>,
     /// 直前に読んだ画像の、位置合わせ後の画面 (SCREEN_WIDTH x SCREEN_HEIGHT の RGBA)
     aligned: Option<Vec<u8>>,
+    /// 直前に読んだ写真の、写真の座標 → 画面の座標 (位置合わせに失敗していれば None)
+    h: Option<Mat3>,
 }
 
 impl Reader {
@@ -50,6 +54,7 @@ impl Reader {
             templates,
             init_timings: timing::take(),
             aligned: None,
+            h: None,
         }
     }
 
@@ -62,6 +67,7 @@ impl Reader {
     pub fn read(&mut self, rgba: &[u8], width: u32, height: u32) -> Result<ReadResult, InputError> {
         let photo = RgbaView::new(rgba, width, height)?;
         self.aligned = None;
+        self.h = None;
         timing::take(); // 前の読み取りの記録を消す
         let aligned = match self.aligner.align(&photo) {
             Ok(a) => a,
@@ -91,12 +97,20 @@ impl Reader {
             }
         }
         self.aligned = Some(screen);
+        self.h = Some(aligned.h);
         Ok(result)
     }
 
     /// 直前に読んだ画像の、位置合わせ後の画面。位置合わせに失敗していれば None
     pub fn aligned_image(&self) -> Option<&[u8]> {
         self.aligned.as_deref()
+    }
+
+    /// テスト用 (劣化検証、tests/degradation.rs): 直前に読んだ写真で、画面の点 (x, y) が写真のどこに写っているか。
+    /// 位置合わせに失敗していれば None
+    #[doc(hidden)]
+    pub fn screen_to_photo(&self, x: f32, y: f32) -> Option<[f32; 2]> {
+        inv3(self.h.as_ref()?).map(|hinv| transform_point(&hinv, [x, y]))
     }
 
     /// 位置合わせ後の画面 (1280x720) を読む
