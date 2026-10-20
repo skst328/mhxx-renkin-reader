@@ -76,7 +76,8 @@ export function PhotoDropzone({
           {/* 選んだ写真そのもの (読み取り中でなければ、押すと別の写真を選び直せる)。読み取り中は上に幕をかけて、動いていることを示す。
               古いスマホでは大きな写真が出るまで時間がかかり、その間は写真の大きさが 0 なので、枠に最低限の大きさを持たせる */}
           <div className="relative mx-auto flex min-h-48 w-fit min-w-64 items-center justify-center rounded-md bg-muted">
-            <img src={selected.url} alt="選んだ写真" className="max-h-[40vh] w-auto rounded-md" />
+            {/* 大きな写真を出す準備を待たずに、先に読み取り中の幕を描かせる */}
+            <img src={selected.url} alt="選んだ写真" decoding="async" className="max-h-[40vh] w-auto rounded-md" />
             {reading && (
               <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 rounded-md bg-background/75 backdrop-blur-[2px]">
                 <LoaderCircleIcon className="size-9 animate-spin text-primary" />

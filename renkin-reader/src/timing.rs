@@ -10,9 +10,9 @@
 //! | align.resize | 写真を長辺 2000px にそろえる |
 //! | align.gray | 灰色にする |
 //! | sift.initial | SIFT: 最初の画像 (2 倍に拡大してぼかす) |
-//! | sift.pyramid | SIFT: ガウシアンのピラミッド |
-//! | sift.dog | SIFT: DoG (ぼかした画像どうしの差) |
-//! | sift.extrema | SIFT: 極値の探索と向き |
+//! | sift.pyramid | SIFT: ガウシアンのピラミッド (段ごとに記録) |
+//! | sift.dog | SIFT: DoG (ぼかした画像どうしの差。段ごとに記録) |
+//! | sift.extrema | SIFT: 極値の探索と向き (段ごとに記録) |
 //! | sift.descriptors | SIFT: 記述子 |
 //! | align.match | 写真と型紙の特徴点の総当たりの対応づけ |
 //! | align.ransac | RANSAC で射影変換を求める |

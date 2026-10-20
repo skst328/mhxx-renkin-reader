@@ -210,8 +210,8 @@ impl Sift {
         )
     }
 
-    /// buildGaussianPyramid
-    fn gaussian_pyramid(&self, base: Image<f32>, n_octaves: usize) -> Vec<Vec<Image<f32>>> {
+    /// buildGaussianPyramid の各層で足すぼかし
+    fn octave_sigmas(&self) -> Vec<f64> {
         let nl = self.n_layers;
         let k = 2f64.powf(1.0 / nl as f64);
         let mut sig = vec![self.sigma];
@@ -220,31 +220,68 @@ impl Sift {
             let total = prev * k;
             sig.push((total * total - prev * prev).sqrt());
         }
-        let mut pyr: Vec<Vec<Image<f32>>> = Vec::new();
-        let mut base = Some(base);
-        let mut scratch = Vec::new(); // ぼかしの途中の結果。ぼかしのたびに使い回す
-        for o in 0..n_octaves {
-            let mut octave = Vec::with_capacity(nl + 3);
-            for i in 0..nl + 3 {
-                let img = if i == 0 {
-                    if o == 0 {
-                        base.take().unwrap()
-                    } else {
-                        downsample_nearest(&pyr[o - 1][nl])
-                    }
-                } else {
-                    gaussian_blur(
-                        &octave[i - 1],
-                        Sigma::F64(sig[i]),
-                        self.symmetric_blur,
-                        &mut scratch,
-                    )
-                };
-                octave.push(img);
-            }
-            pyr.push(octave);
+        sig
+    }
+
+    /// buildGaussianPyramid の 1 段分 (nl + 3 層)。base がその段の 0 層目
+    fn gaussian_octave(
+        &self,
+        base: Image<f32>,
+        sig: &[f64],
+        scratch: &mut Vec<f32>,
+    ) -> Vec<Image<f32>> {
+        let mut octave = Vec::with_capacity(self.n_layers + 3);
+        octave.push(base);
+        for s in &sig[1..] {
+            let img = gaussian_blur(
+                octave.last().unwrap(),
+                Sigma::F64(*s),
+                self.symmetric_blur,
+                scratch,
+            );
+            octave.push(img);
         }
-        pyr
+        octave
+    }
+
+    /// buildDoGPyramid の 1 段分。あとで使うのは 1〜nl 層 (向きと記述子。nl 層は次の段の元にもなる) だけなので、
+    /// それを返し、ほかの層 (0 層と nl+1、nl+2 層) は捨てる。捨てる層の領域にはそのまま差を書いて、メモリを取り直さない
+    /// (差の計算は 上の層 - 下の層 のままなので、結果は変わらない)
+    fn difference_of_gaussians(
+        &self,
+        octave: Vec<Image<f32>>,
+    ) -> (Vec<Image<f32>>, Vec<Image<f32>>) {
+        let kept = 1..=self.n_layers;
+        let mut layers: Vec<Option<Image<f32>>> = octave.into_iter().map(Some).collect();
+        let mut dog = Vec::with_capacity(layers.len() - 1);
+        for i in 0..layers.len() - 1 {
+            let d = if kept.contains(&i) {
+                let (lower, upper) = (layers[i].as_ref().unwrap(), layers[i + 1].as_ref().unwrap());
+                let data = upper
+                    .data()
+                    .iter()
+                    .zip(lower.data())
+                    .map(|(a, b)| a - b)
+                    .collect();
+                Image::from_vec(lower.width(), lower.height(), data)
+            } else {
+                // 下の層はこの差を作ったらもう使わない
+                let mut lower = layers[i].take().unwrap();
+                let upper = layers[i + 1].as_ref().unwrap();
+                for (b, a) in lower.data_mut().iter_mut().zip(upper.data()) {
+                    *b = a - *b;
+                }
+                lower
+            };
+            dog.push(d);
+        }
+        let kept = layers
+            .into_iter()
+            .enumerate()
+            .filter(|(i, _)| kept.contains(i))
+            .map(|(_, l)| l.unwrap())
+            .collect();
+        (kept, dog)
     }
 
     /// adjustLocalExtrema: 極値の位置を補間で詰め、弱いものや辺の上のものを捨てる。(特徴点, 層, 行, 列) を返す
@@ -401,82 +438,84 @@ impl Sift {
         hist
     }
 
-    /// findScaleSpaceExtrema
-    fn find_extrema(&self, gpyr: &[Vec<Image<f32>>], dpyr: &[Vec<Image<f32>>]) -> Vec<KeyPoint> {
+    /// findScaleSpaceExtrema の 1 段 (o 段) 分。gauss はその段の 1〜nl 層、dog はその段の差の全部。見つけた特徴点を kps に足す
+    fn octave_extrema(
+        &self,
+        o: usize,
+        gauss: &[Image<f32>],
+        dog: &[Image<f32>],
+        kps: &mut Vec<KeyPoint>,
+    ) {
         let nl = self.n_layers;
         let n = SIFT_ORI_HIST_BINS;
         let threshold = (0.5 * self.contrast_threshold / nl as f64 * 255.0).floor() as f32;
         let b = SIFT_IMG_BORDER as usize;
-        let mut kps = Vec::new();
-        for (o, dog) in dpyr.iter().enumerate() {
-            let (w, h) = (dog[0].width(), dog[0].height());
-            if h <= 2 * b || w <= 2 * b {
-                continue;
-            }
-            for i in 1..=nl {
-                let (prev, cur, next) = (&dog[i - 1], &dog[i], &dog[i + 1]);
-                let mut mask = vec![0u8; w];
-                for r in b..h - b {
-                    // 前後の層と同じ層の、上・中・下の行
-                    let rows: [&[f32]; 9] = [prev, cur, next]
-                        .map(|im| [im.row(r - 1), im.row(r), im.row(r + 1)])
-                        .concat()
-                        .try_into()
-                        .unwrap();
-                    // 閾値と同じ層の上下左右だけで、行全体を分岐なしにふるいにかける (SIMD にしやすい)
-                    candidates(rows[3], rows[4], rows[5], threshold, &mut mask);
-                    for c in b..w - b {
-                        if mask[c] == 0 {
-                            continue;
+        let (w, h) = (dog[0].width(), dog[0].height());
+        if h <= 2 * b || w <= 2 * b {
+            return;
+        }
+        for i in 1..=nl {
+            let (prev, cur, next) = (&dog[i - 1], &dog[i], &dog[i + 1]);
+            let mut mask = vec![0u8; w];
+            for r in b..h - b {
+                // 前後の層と同じ層の、上・中・下の行
+                let rows: [&[f32]; 9] = [prev, cur, next]
+                    .map(|im| [im.row(r - 1), im.row(r), im.row(r + 1)])
+                    .concat()
+                    .try_into()
+                    .unwrap();
+                // 閾値と同じ層の上下左右だけで、行全体を分岐なしにふるいにかける (SIMD にしやすい)
+                candidates(rows[3], rows[4], rows[5], threshold, &mut mask);
+                for c in b..w - b {
+                    if mask[c] == 0 {
+                        continue;
+                    }
+                    let v = rows[4][c];
+                    // 26 近傍の全部以上 (正のとき) か、全部以下 (負のとき) か。違うとわかったら打ち切る
+                    let ok = |x: f32| if v > 0.0 { x <= v } else { x >= v };
+                    let is_extremum = rows.iter().enumerate().all(|(i, row)| {
+                        let n = &row[c - 1..c + 2];
+                        if i == 4 {
+                            ok(n[0]) && ok(n[2])
+                        } else {
+                            ok(n[0]) && ok(n[1]) && ok(n[2])
                         }
-                        let v = rows[4][c];
-                        // 26 近傍の全部以上 (正のとき) か、全部以下 (負のとき) か。違うとわかったら打ち切る
-                        let ok = |x: f32| if v > 0.0 { x <= v } else { x >= v };
-                        let is_extremum = rows.iter().enumerate().all(|(i, row)| {
-                            let n = &row[c - 1..c + 2];
-                            if i == 4 {
-                                ok(n[0]) && ok(n[2])
-                            } else {
-                                ok(n[0]) && ok(n[1]) && ok(n[2])
+                    });
+                    if !is_extremum {
+                        continue;
+                    }
+                    let Some((kp, layer, r1, c1)) = self.adjust(dog, o, i, r, c) else {
+                        continue;
+                    };
+                    let scl_octv = kp.size as f64 * 0.5 / (1u32 << o) as f64;
+                    let hist = Self::orientation_hist(
+                        &gauss[layer - 1],
+                        c1 as i64,
+                        r1 as i64,
+                        cv_round(SIFT_ORI_RADIUS * scl_octv),
+                        SIFT_ORI_SIG_FCTR * scl_octv,
+                    );
+                    let mag_thr = hist.iter().copied().fold(f32::NEG_INFINITY, f32::max)
+                        * SIFT_ORI_PEAK_RATIO;
+                    for j in 0..n {
+                        let (hl, hj, hr) = (hist[(j + n - 1) % n], hist[j], hist[(j + 1) % n]);
+                        if hj > hl && hj > hr && hj >= mag_thr {
+                            let mut bin = j as f32 + 0.5 * (hl - hr) / (hl - 2.0 * hj + hr);
+                            if bin < 0.0 {
+                                bin += n as f32;
+                            } else if bin >= n as f32 {
+                                bin -= n as f32;
                             }
-                        });
-                        if !is_extremum {
-                            continue;
-                        }
-                        let Some((kp, layer, r1, c1)) = self.adjust(dog, o, i, r, c) else {
-                            continue;
-                        };
-                        let scl_octv = kp.size as f64 * 0.5 / (1u32 << o) as f64;
-                        let hist = Self::orientation_hist(
-                            &gpyr[o][layer],
-                            c1 as i64,
-                            r1 as i64,
-                            cv_round(SIFT_ORI_RADIUS * scl_octv),
-                            SIFT_ORI_SIG_FCTR * scl_octv,
-                        );
-                        let mag_thr = hist.iter().copied().fold(f32::NEG_INFINITY, f32::max)
-                            * SIFT_ORI_PEAK_RATIO;
-                        for j in 0..n {
-                            let (hl, hj, hr) = (hist[(j + n - 1) % n], hist[j], hist[(j + 1) % n]);
-                            if hj > hl && hj > hr && hj >= mag_thr {
-                                let mut bin = j as f32 + 0.5 * (hl - hr) / (hl - 2.0 * hj + hr);
-                                if bin < 0.0 {
-                                    bin += n as f32;
-                                } else if bin >= n as f32 {
-                                    bin -= n as f32;
-                                }
-                                let mut ang = 360.0 - (360.0 / n as f32) * bin;
-                                if (ang - 360.0).abs() < FLT_EPSILON {
-                                    ang = 0.0;
-                                }
-                                kps.push(KeyPoint { angle: ang, ..kp });
+                            let mut ang = 360.0 - (360.0 / n as f32) * bin;
+                            if (ang - 360.0).abs() < FLT_EPSILON {
+                                ang = 0.0;
                             }
+                            kps.push(KeyPoint { angle: ang, ..kp });
                         }
                     }
                 }
             }
         }
-        kps
     }
 
     /// calcSIFTDescriptor
@@ -634,26 +673,30 @@ impl Sift {
         let base = time("sift.initial", || self.initial_image(gray));
         let n_oct = (cv_round((base.width().min(base.height()) as f64).ln() / 2f64.ln() - 2.0)
             - first_octave as i64) as usize;
-        let gpyr = time("sift.pyramid", || self.gaussian_pyramid(base, n_oct));
-        let dpyr: Vec<Vec<Image<f32>>> = time("sift.dog", || {
-            gpyr.iter()
-                .map(|oc| {
-                    (0..oc.len() - 1)
-                        .map(|i| {
-                            let data = oc[i + 1]
-                                .data()
-                                .iter()
-                                .zip(oc[i].data())
-                                .map(|(a, b)| a - b)
-                                .collect();
-                            Image::from_vec(oc[i].width(), oc[i].height(), data)
-                        })
-                        .collect()
-                })
-                .collect()
-        });
-        let mut kps = time("sift.extrema", || self.find_extrema(&gpyr, &dpyr));
-        drop(dpyr);
+        // 段ごとに、ぼかした画像を作る → 差を作る → 極値を探す、を済ませてから次の段に進む。
+        // 全部の段を作ってから探すより、一度に持つ画像が少なくて済む (いちばん大きい 0 段は、2 倍に拡大した画像の大きさ)。
+        // gpyr は各段の 1〜nl 層だけを持つ (向きと記述子で使う)
+        let nl = self.n_layers;
+        let sig = self.octave_sigmas();
+        let mut scratch = Vec::new(); // ぼかしの途中の結果。ぼかしのたびに使い回す
+        let mut gpyr: Vec<Vec<Image<f32>>> = Vec::with_capacity(n_oct);
+        let mut kps = Vec::new();
+        let mut base = Some(base);
+        for o in 0..n_oct {
+            // 次の段の 0 層は、前の段の nl 層を半分にしたもの
+            let first = base
+                .take()
+                .unwrap_or_else(|| downsample_nearest(&gpyr[o - 1][nl - 1]));
+            let octave = time("sift.pyramid", || {
+                self.gaussian_octave(first, &sig, &mut scratch)
+            });
+            let (gauss, dog) = time("sift.dog", || self.difference_of_gaussians(octave));
+            time("sift.extrema", || {
+                self.octave_extrema(o, &gauss, &dog, &mut kps)
+            });
+            gpyr.push(gauss);
+        }
+        drop(scratch);
 
         // KeyPointsFilter::removeDuplicatedSorted
         kps.sort_by(|a, b| {
@@ -698,7 +741,7 @@ impl Sift {
                     } else {
                         (1u32 << -octave) as f64
                     };
-                    let img = &gpyr[(octave - first_octave) as usize][layer];
+                    let img = &gpyr[(octave - first_octave) as usize][layer - 1];
                     let mut ang = 360.0 - k.angle as f64;
                     if (ang - 360.0).abs() < FLT_EPSILON as f64 {
                         ang = 0.0;
