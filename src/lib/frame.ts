@@ -28,7 +28,7 @@ export function parseFrame(text: string): number | null {
   return n <= 4_294_967_295 ? n : null
 }
 
-/** フレームをゲーム開始からの時間としてざっくり表す (mhxx-combo-scan の approximateDuration と同じ丸め方) */
+/** フレームをゲーム開始からの時間としてざっくり表す */
 export function approximateTime(frame: number): string {
   if (frame <= 0) return '0秒'
   const seconds = frame / FPS

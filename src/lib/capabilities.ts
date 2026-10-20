@@ -1,4 +1,4 @@
-/** ブラウザが読み取りと検索に必要な機能を備えているか (mhxx-combo-scan と同じ形) */
+/** ブラウザが読み取りと検索に必要な機能を備えているか */
 export type Capabilities = {
   /** 使い始められるか */
   ready: boolean

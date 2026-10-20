@@ -325,7 +325,7 @@ export default function App() {
             </section>
             <div className="border-t pt-4">
               {searching ? (
-                // 検索中は進み具合 (mhxx-combo-scan と同じ見た目) と中止
+                // 検索中は進み具合 と中止
                 <div className="space-y-2">
                   <div className="flex items-center justify-between gap-3">
                     <p className="flex items-center gap-2 text-sm text-muted-foreground">

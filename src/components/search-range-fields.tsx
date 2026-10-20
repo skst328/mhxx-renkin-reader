@@ -2,7 +2,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { approximateTime, parseFrame } from '@/lib/frame'
 
-/** 錬金したフレームを探す範囲 [開始, 終了) (mhxx-combo-scan の SearchRangeFields と同じ作り) */
+/** 錬金したフレームを探す範囲 [開始, 終了) */
 export function SearchRangeFields({
   start,
   end,

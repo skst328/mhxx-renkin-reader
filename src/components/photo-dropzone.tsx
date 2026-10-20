@@ -5,7 +5,7 @@ import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 
 /**
- * 写真を受け取る領域 (mhxx-combo-scan の VideoDropzone と同じ作り)。`<label>` で入力を包んであるので、
+ * 写真を受け取る領域。`<label>` で入力を包んであるので、
  * クリックでもタップでもファイル選択が開く。ドラッグ&ドロップはページ全体が受ける。
  * 選んだあとはこの領域自体が、ファイル名とリセットの行と、選んだ写真の表示になる。そのまま次の写真も受け取れる
  */

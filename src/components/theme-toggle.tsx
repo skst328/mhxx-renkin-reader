@@ -17,7 +17,7 @@ const ICON = {
   dark: MoonIcon,
 }
 
-/** 押すたびに 端末の設定 → ライト → ダーク と切り替わる (mhxx-combo-scan と同じ) */
+/** 押すたびに 端末の設定 → ライト → ダーク と切り替わる */
 export function ThemeToggle() {
   const { theme, setTheme } = useTheme()
   const Icon = ICON[theme]

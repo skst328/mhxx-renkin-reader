@@ -4,12 +4,12 @@ import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
 import { defineConfig } from 'vite'
 
-// バージョンは package.json の version だけで管理し、ビルド時にアプリへ埋め込む (mhxx-combo-scan と同じ)
+// バージョンは package.json の version だけで管理し、ビルド時にアプリへ埋め込む
 const { version } = JSON.parse(readFileSync(new URL('./package.json', import.meta.url), 'utf8')) as { version: string }
 
 // https://vite.dev/config/
 export default defineConfig(({ mode }) => ({
-  // GitHub Pages はリポジトリ名のサブパスで配信される。開発サーバーは / のままにしたいので分ける (mhxx-combo-scan と同じ)
+  // GitHub Pages はリポジトリ名のサブパスで配信される。開発サーバーは / のままにしたいので分ける
   base: mode === 'production' ? '/mhxx-renkin-reader/' : '/',
   plugins: [react(), tailwindcss()],
   define: {
