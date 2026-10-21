@@ -11,6 +11,8 @@ usage: python tools/sync_assets.py [experimental-charm-reader の charm_reader/a
 - label.png: 型紙 (ui_reference.png) の色チャンネルの最大値のうち、パネルのラベル (LABEL_BLOCK) のまわりに
   LABEL_MARGIN px の余白を付けて切り出したもの。読み取りはこれにトップハット (25x25) をかけてから内側を使う。
   トップハット (収縮してから膨張) が届くのは 24px までなので、余白が 24px あれば型紙全体にかけたときと同じ値になる
+- heading.png: 同じく、鑑定ボックスの見出し「鑑定ボックス」(HEADING_BLOCK) のまわりに LABEL_MARGIN px の余白を付けて
+  切り出したもの。何個目かを読む前に、鑑定ボックスのあたりの位置を確かめて補正するのに使う
 """
 import shutil
 import sys
@@ -20,6 +22,7 @@ import cv2
 
 LABEL_BLOCK = (476, 166, 570, 247)  # experimental-charm-reader の reader.LABEL_BLOCK と同じ
 LABEL_MARGIN = 24                   # renkin-reader の vision::read::LABEL_MARGIN と同じ
+HEADING_BLOCK = (883, 67, 999, 92)  # renkin-reader の vision::read::HEADING_BLOCK と同じ
 DEST = Path(__file__).resolve().parents[1] / "renkin-reader" / "assets"
 DEFAULT_SRC = Path(__file__).resolve().parents[2] / "experimental-charm-reader" / "charm_reader" / "assets"
 
@@ -35,6 +38,8 @@ def main(src):
     x0, y0, x1, y1 = LABEL_BLOCK
     m = LABEL_MARGIN
     cv2.imwrite(str(DEST / "label.png"), ref.max(axis=2)[y0 - m:y1 + m, x0 - m:x1 + m])
+    x0, y0, x1, y1 = HEADING_BLOCK
+    cv2.imwrite(str(DEST / "heading.png"), ref.max(axis=2)[y0 - m:y1 + m, x0 - m:x1 + m])
     # 位置合わせの型紙 (灰色)。SIFT は灰色の画像で特徴点を取る
     cv2.imwrite(str(DEST / "reference.png"), cv2.cvtColor(ref, cv2.COLOR_BGR2GRAY))
     shutil.copy2(src / "grid_dot.png", DEST / "grid_dot.png")

@@ -27,6 +27,21 @@ pub const SCREEN: (usize, usize) = (1280, 720);
 pub const WORK_LONG_SIDE: f64 = 2000.0;
 /// SIFT の特徴点の数の上限
 pub const SIFT_FEATURES: usize = 8000;
+/// 写真の SIFT で、最初に 2 倍に拡大するか (Sift::upscale)。型紙の特徴量 (埋め込んだもの) は拡大ありで求めている。
+/// 拡大しないと、読み取りの時間が半分ほど、wasm のメモリが 1/3 ほどになる (16 MP の写真で 553 → 187 MB)。
+/// charm-pics の写真で拡大をやめて読めなくなったのは、画面が一番小さく写った 1 枚 (tests/005/IMG_0131.HEIC。
+/// 縮めた画像で画面 1px が 0.46px) だけ。劣化検証で読めなくなる境目 (縮小など) は、拡大ありと変わらない
+pub const PHOTO_UPSCALE: bool = false;
+
+/// 写真の SIFT で 2 倍に拡大するか。ネイティブのテストのときだけ、環境変数 RENKIN_PHOTO_UPSCALE (1 なら拡大する、
+/// 0 ならしない) で PHOTO_UPSCALE を上書きできる (拡大の有無で読み取りがどう変わるかを、コードを変えずに比べるため)
+fn photo_upscale() -> bool {
+    #[cfg(not(target_arch = "wasm32"))]
+    if let Ok(v) = std::env::var("RENKIN_PHOTO_UPSCALE") {
+        return v != "0";
+    }
+    PHOTO_UPSCALE
+}
 /// 対応点がこれ未満なら失敗
 pub const MIN_MATCHES: usize = 12;
 
@@ -241,7 +256,11 @@ impl Aligner {
     pub fn new() -> Self {
         let (ref_pts, ref_des) = reference_features();
         Self {
-            sift: Sift::new(SIFT_FEATURES),
+            sift: {
+                let mut sift = Sift::new(SIFT_FEATURES);
+                sift.upscale = photo_upscale();
+                sift
+            },
             ref_pts,
             ref_des,
             dot: assets::GRID_DOT.image().map(f32::from),

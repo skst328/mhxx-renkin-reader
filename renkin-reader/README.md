@@ -19,6 +19,7 @@ MHXX の錬金結果の鑑定画面を写真から読む Rust のクレート。
 | PNG の読み込み | `src/vision/cv/image.rs` | `tests/fixtures/load/` |
 | 見本の下ごしらえが Python 版と同じ | `src/vision/read.rs` | `tests/fixtures/read/` |
 | 型紙の SIFT が NumPy 版と bit-exact、OpenCV と特徴点が全部・記述子が 1402 / 1415 同じ | `src/vision/cv/sift.rs` | `tests/fixtures/sift/` |
+| 埋め込んだ型紙の特徴量が、今の SIFT で型紙から求めたものとバイト単位で同じ | `src/vision/align.rs` (`reference_features_are_up_to_date`) | `assets/reference_features.bin` |
 | RANSAC と最小二乗がインライアの判定まで NumPy 版と同じ | `src/vision/cv/ransac.rs` | `tests/fixtures/cv/ransac.json` |
 | 錬金で出る護石とフレームの探索が mhxx-rng (ノートブック) と同じ (2 種類の表の全スキルを最低 1 回通す)。探索は 1 フレームずつ素直に作ったものとも同じ。mhxx-rng の「有名なお守り」6 個を 0〜10 億フレームで探して、Python 版と同じで当たりフレームの数も一覧と同じ (これだけで 20 秒ほど) | `src/rng.rs` | `tests/fixtures/rng/` |
 | 人工の写真 12 枚を写真から最後まで読んで、期待どおり (読める 10 枚、撮り直し 2 枚) | `tests/synthetic.rs` | `tests/synthetic/answers.csv` |
@@ -30,6 +31,10 @@ MHXX の錬金結果の鑑定画面を写真から読む Rust のクレート。
 - `tests/fixtures/`: `python tools/make_fixtures.py`。入力は乱数の小さな画像と見本 (`assets/`) と人工の写真で、写真は使わない。
   `tests/fixtures/rng/` は mhxx-rng のノートブック (リポジトリの隣に clone した mhxx-rng。experimental-charm-reader の
   charm_reader/mhxx_rng.py を参照) と numba も要る
+- `assets/reference_features.bin` (位置合わせの型紙の特徴量): `RENKIN_WRITE_REFERENCE=1 cargo test --release reference_features_are_up_to_date`。
+  SIFT か型紙 (`assets/reference.png`) を変えたら作り直す。型紙は SIFT の 2 倍拡大ありで求める (`Sift::new` の既定)。
+  写真の SIFT は拡大なし (`vision::align::PHOTO_UPSCALE`) だが、型紙とは別々に決めてよい (SIFT の特徴点は大きさが
+  違っても対応する)。型紙の特徴量は写真側の設定 (`RENKIN_PHOTO_UPSCALE` など) には左右されない
 - `tests/synthetic/`: `python tools/make_synthetic.py`。charm-pics のキャプチャ (鑑定画面のゲーム画面だけ) を部屋の写真の中に斜めに置き、ボケ・ノイズ・JPEG・反射・左右反転などを加えたもの。何度作っても同じ画像になる。作ったら Python 版でも期待どおりか確かめる (`python -m charm_reader.evaluate <このディレクトリ>/tests/synthetic`)
 
 ### charm-pics を使うもの (`--ignored`)
@@ -37,12 +42,13 @@ MHXX の錬金結果の鑑定画面を写真から読む Rust のクレート。
 | 何を確かめるか / 測るか | 動かし方 |
 |---|---|
 | charm-pics の写真 288 枚を写真から最後まで読んで、期待どおり (`tests/charm_pics.rs`) | `cargo test --release --test charm_pics -- --ignored --nocapture` (3 スレッドで 100 秒ほど) |
+| 劣化 (縮小・ピンボケ・手ぶれ・ノイズ・JPEG・ガンマ・反射) を段階的に加えて読み、自信ありの読み間違い (すり抜け) が無いか (`tests/degradation.rs`) | `cargo test --release --test degradation -- --ignored --nocapture` (時間がかかる。絞り方などはファイルの先頭のコメント) |
 | 段階ごとの時間 (ネイティブ、`tests/profile.rs`) | `cargo test --release --test profile -- --ignored --nocapture` |
 | 段階ごとの時間 (wasm。JS との境界も通る) | `wasm-pack build --release --target nodejs --out-dir <pkg>` してから `node ../tools/bench.mjs <pkg> [--json 結果.json]`。2 つの結果は `node ../tools/bench.mjs --compare 前.json 後.json` で比べる (読み取り結果が同じかと時間) |
 
 - charm-pics の場所は環境変数 `CHARM_PICS` (無ければ、このリポジトリの隣の `charm-pics`)
 - 写真から作ったデータは `tests/golden/` (gitignore) に `python tools/export_golden.py` で書き出す: HEIC を JPEG にしたもの (Rust で HEIC を開けないため) と、時間を測る写真を RGBA にしたもの
-- 期待と違うことがわかっていて許しているものは、`tests/charm_pics.rs` の `KNOWN` に理由と一緒に書く (今は JPEG の開き方の違いで読めない 1 枚)
+- 期待と違うことがわかっていて許しているものは、`tests/charm_pics.rs` の `KNOWN` に理由と一緒に書く (今は JPEG の開き方の違いで読めない 1 枚と、画面がとても小さく写っていて 2 倍拡大なしでは位置合わせできない 1 枚)
 
 ### 写真から最後まで読むテストの道具
 
@@ -53,6 +59,7 @@ MHXX の錬金結果の鑑定画面を写真から読む Rust のクレート。
 - `RENKIN_LIMIT=<n>`: 先頭の n 枚だけ
 - `RENKIN_DUMP=<ディレクトリ>`: 位置合わせ後の画面を PNG で書き出す
 - `RENKIN_DECODED=1` (charm_pics だけ): OpenCV で開いた画素 (`export_golden.py --decoded <名前の一部>` で書き出す) を使う
+- `RENKIN_PHOTO_UPSCALE=1`: 写真の SIFT で最初の 2 倍拡大をする (既定はしない。`vision::align::PHOTO_UPSCALE` の上書きで、ネイティブのテストだけで効く。`0` で拡大しない)
 
 ### wasm で流す
 

@@ -178,6 +178,9 @@ pub struct Sift {
     pub nfeatures: usize,
     /// ぼかしを左右対称の畳み込み (速い) でするか、NumPy 版と同じ順番で足すか
     pub symmetric_blur: bool,
+    /// 最初に画像を 2 倍に拡大するか (OpenCV の既定と同じ firstOctave = -1)。false なら拡大を省く (firstOctave = 0)。
+    /// 拡大すると細かい特徴点まで取れるが、一番大きい段の画像の面積が 4 倍になり、時間とメモリもほぼ 4 倍かかる
+    pub upscale: bool,
     n_layers: usize,
     contrast_threshold: f64,
     edge_threshold: f64,
@@ -190,6 +193,7 @@ impl Sift {
         Self {
             nfeatures,
             symmetric_blur: true,
+            upscale: true,
             n_layers: 3,
             contrast_threshold: 0.04,
             edge_threshold: 10.0,
@@ -197,8 +201,19 @@ impl Sift {
         }
     }
 
-    /// createInitialImage: 2 倍に拡大して、足りない分のぼかしをかける
+    /// createInitialImage: (upscale なら 2 倍に拡大して) 足りない分のぼかしをかける
     fn initial_image(&self, gray: &Image<u8>) -> Image<f32> {
+        if !self.upscale {
+            let sig_diff = (self.sigma.powi(2) - SIFT_INIT_SIGMA.powi(2))
+                .max(0.01)
+                .sqrt();
+            return gaussian_blur(
+                &gray.map(f32::from),
+                Sigma::F32(sig_diff as f32),
+                self.symmetric_blur,
+                &mut Vec::new(),
+            );
+        }
         let sig_diff = (self.sigma.powi(2) - SIFT_INIT_SIGMA.powi(2) * 4.0)
             .max(0.01)
             .sqrt();
@@ -668,13 +683,16 @@ impl Sift {
         &self,
         gray: &Image<u8>,
     ) -> (Vec<KeyPoint>, Vec<[f32; DESCRIPTOR_LEN]>) {
-        let first_octave: i32 = -1;
+        let first_octave: i32 = if self.upscale { -1 } else { 0 };
         use crate::timing::time;
         let base = time("sift.initial", || self.initial_image(gray));
+        // 段の数。小さすぎる画像では 0 以下になるので 0 にする (特徴点は取れない)
         let n_oct = (cv_round((base.width().min(base.height()) as f64).ln() / 2f64.ln() - 2.0)
-            - first_octave as i64) as usize;
+            - first_octave as i64)
+            .max(0) as usize;
         // 段ごとに、ぼかした画像を作る → 差を作る → 極値を探す、を済ませてから次の段に進む。
-        // 全部の段を作ってから探すより、一度に持つ画像が少なくて済む (いちばん大きい 0 段は、2 倍に拡大した画像の大きさ)。
+        // 全部の段を作ってから探すより、一度に持つ画像が少なくて済む (いちばん大きい 0 段は、upscale なら 2 倍に
+        // 拡大した画像の大きさ)。
         // gpyr は各段の 1〜nl 層だけを持つ (向きと記述子で使う)
         let nl = self.n_layers;
         let sig = self.octave_sigmas();

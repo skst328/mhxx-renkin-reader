@@ -59,7 +59,11 @@ fn main() {
             entries.join(", ")
         ));
     }
-    for (name, file) in [("LABEL", "label.png"), ("GRID_DOT", "grid_dot.png")] {
+    for (name, file) in [
+        ("LABEL", "label.png"),
+        ("HEADING", "heading.png"),
+        ("GRID_DOT", "grid_dot.png"),
+    ] {
         index.push_str(&format!(
             "pub static {name}: Asset = {};\n",
             entry(&dir.join(file), &mut blob)

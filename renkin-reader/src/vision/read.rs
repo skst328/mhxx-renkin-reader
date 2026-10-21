@@ -32,6 +32,16 @@ pub const NAME_LEFT: usize = 667;
 pub const NAME_SEARCH: usize = 4;
 /// パネルのラベルを、予想位置から ±何 px 探すか
 pub const LABEL_SEARCH: usize = 30;
+/// 鑑定ボックスの見出し「鑑定ボックス」の文字のかたまり (左, 上, 右, 下)。assets/heading.png はこのまわりに
+/// LABEL_MARGIN px の余白を付けたもの
+pub const HEADING_BLOCK: (usize, usize, usize, usize) = (883, 67, 999, 92);
+/// 見出しを、予想位置から ±何 px 探すか。何個目かは補助的な情報 (不明でもフレームの探索は取りこぼさない) なので、
+/// 鑑定ボックスのあたりの位置合わせが少しでもずれていれば不明にする。そのため狭く探し、外にあれば見つからない
+/// (ふつうの画面のずれは 2px まで。位置合わせがマス 1 つ分ずれた画面は 14〜44px。charm-pics の写真で、今の設定と
+/// SIFT の 2 倍拡大を省いたとき)
+pub const HEADING_SEARCH: usize = 8;
+/// 見出しの一致度がこれ未満なら、見出しが見つからないので何個目かは不明 (ふつうの画面は 0.65 以上)
+pub const HEADING_MIN_SCORE: f64 = 0.6;
 /// ラベルの一致度がこれ未満なら、パネルの位置を確かめられない (ずれを戻さない)
 pub const LABEL_MIN_SCORE: f64 = 0.5;
 /// ラベルが予想位置から縦か横にこれより大きくずれていたら、位置合わせがおかしい (撮り直し)。
@@ -113,6 +123,8 @@ pub struct Templates {
     pub dash: Image<f32>,
     /// パネルの固定ラベル (トップハット済み、LABEL_BLOCK の大きさ)
     pub label: Image<u8>,
+    /// 鑑定ボックスの見出し (トップハット済み、HEADING_BLOCK の大きさ)
+    pub heading: Image<u8>,
 }
 
 impl Templates {
@@ -145,6 +157,12 @@ impl Templates {
                 LABEL_MARGIN,
                 x1 - x0,
                 y1 - y0,
+            ),
+            heading: tophat(&assets::HEADING.image()).crop(
+                LABEL_MARGIN,
+                LABEL_MARGIN,
+                HEADING_BLOCK.2 - HEADING_BLOCK.0,
+                HEADING_BLOCK.3 - HEADING_BLOCK.1,
             ),
         }
     }
@@ -596,48 +614,82 @@ pub const BOX_ORIGIN: (usize, usize) = (905, 125);
 pub const BOX_PITCH: usize = 36;
 pub const BOX_COLS: usize = 10;
 pub const BOX_ROWS: usize = 7;
-/// 黄色い枠の画素の割合がこれ未満なら、枠が写っていないとみなす
-pub const INDEX_MIN_SCORE: f64 = 0.1;
+/// 黄色い枠の画素の割合がこれ未満なら、枠が見つからないとみなす (何個目かは不明)。ふつうの画面でカーソルの
+/// 枠が乗ったマスは 0.20 以上。手ぶれなどで枠がにじむと 0.10〜0.15 ほどになり、隣のマスと読み違えやすい
+pub const INDEX_MIN_SCORE: f64 = 0.15;
 
-/// 鑑定ボックスのマスごとに、枠のあたり (外側 4px) の黄色い画素の割合 (マスの正方形全体に対する割合)
-fn box_highlight(screen: &RgbaView) -> Vec<f64> {
-    let yellow = color::in_range(&color::hsv(screen), [18, 120, 150], [35, 255, 255]);
-    let h = BOX_PITCH / 2;
+/// カーソルの枠の画素 (黄色)
+fn yellow_mask(screen: &RgbaView) -> Image<bool> {
+    color::in_range(&color::hsv(screen), [18, 120, 150], [35, 255, 255])
+}
+
+/// 中心 (cx, cy) のマスの枠のあたり (外側 4px) の黄色い画素の割合 (マスの正方形全体に対する割合)。画面の外は黄色でない
+fn ring_ratio(yellow: &Image<bool>, cx: i64, cy: i64) -> f64 {
+    let h = (BOX_PITCH / 2) as i64;
+    let mut n = 0;
+    for y in 0..2 * h {
+        for x in 0..2 * h {
+            let inner = (4..2 * h - 4).contains(&x) && (4..2 * h - 4).contains(&y);
+            let (px, py) = (cx - h + x, cy - h + y);
+            if !inner
+                && (0..yellow.width() as i64).contains(&px)
+                && (0..yellow.height() as i64).contains(&py)
+                && yellow.get(px as usize, py as usize)
+            {
+                n += 1;
+            }
+        }
+    }
+    n as f64 / (4 * h * h) as f64
+}
+
+/// 鑑定ボックスのマスごとに、枠のあたりの黄色い画素の割合。マスの位置は shift (見出しのずれ) だけ動かす
+fn box_highlight(yellow: &Image<bool>, shift: (i64, i64)) -> Vec<f64> {
     let mut out = Vec::new();
     for r in 0..BOX_ROWS {
         for c in 0..BOX_COLS {
             let (cx, cy) = (BOX_ORIGIN.0 + c * BOX_PITCH, BOX_ORIGIN.1 + r * BOX_PITCH);
-            let mut n = 0;
-            for y in 0..2 * h {
-                for x in 0..2 * h {
-                    let inner = (4..2 * h - 4).contains(&x) && (4..2 * h - 4).contains(&y);
-                    if !inner && yellow.get(cx - h + x, cy - h + y) {
-                        n += 1;
-                    }
-                }
-            }
-            out.push(n as f64 / (4 * h * h) as f64);
+            out.push(ring_ratio(yellow, cx as i64 + shift.0, cy as i64 + shift.1));
         }
     }
     out
 }
 
-/// 何個目か (1 から。枠が写っていなければ None)
-fn read_index(screen: &RgbaView) -> Scored<Option<u8>> {
-    let yel = box_highlight(screen);
+/// 何個目かが分からないときの結果 (自信ありの「不明」。何個目かは補助的な情報なので、撮り直しにはしない)
+fn index_unknown() -> Scored<Option<u8>> {
+    Scored {
+        value: None,
+        score: 1.0,
+        margin: 1.0,
+        candidates: vec![(None, 1.0)],
+    }
+}
+
+/// 何個目かを読む (1 から。分からなければ None)。heading は鑑定ボックスの見出しのずれ (dx, dy) と一致度。
+/// 1. 見出しの一致度が HEADING_MIN_SCORE 未満なら、見出しが見つからない (位置合わせがずれている) ので不明
+/// 2. マスの位置を見出しのずれの分だけ補正して、縁の黄色い画素の割合が一番大きいマスを選ぶ。割合が
+///    INDEX_MIN_SCORE 未満なら、カーソルの枠が見つからないので不明
+fn read_index(screen: &RgbaView, heading: (i64, i64, f64)) -> Scored<Option<u8>> {
+    let (hx, hy, hs) = heading;
+    if hs < HEADING_MIN_SCORE {
+        return index_unknown();
+    }
+    let yel = box_highlight(&yellow_mask(screen), (hx, hy));
     let mut order: Vec<usize> = (0..yel.len()).collect();
     order.sort_by(|&a, &b| yel[b].partial_cmp(&yel[a]).unwrap());
     // 同じ割合なら、左上のマス (Python 版の argmax と同じく番号の若いほう)
     let i = order[0];
-    let value = |i: usize| (yel[i] >= INDEX_MIN_SCORE).then_some(i as u8 + 1);
+    if yel[i] < INDEX_MIN_SCORE {
+        return index_unknown();
+    }
     Scored {
-        value: value(i),
+        value: Some(i as u8 + 1),
         score: yel[i],
         margin: yel[i] - yel[order[1]],
         candidates: order
             .iter()
             .take(CANDIDATES)
-            .map(|&k| (value(k), yel[k]))
+            .map(|&k| (Some(k as u8 + 1), yel[k]))
             .collect(),
     }
 }
@@ -660,22 +712,44 @@ pub struct ScreenRead {
     pub slot_scores: [(f64, f64); 3],
     /// パネルのラベルのずれ (dx, dy) と一致度
     pub panel: (i64, i64, f64),
+    /// 何個目か (1 から。分からなければ None)
     pub index: Scored<Option<u8>>,
+    /// 鑑定ボックスの見出しのずれ (dx, dy) と一致度
+    pub heading: (i64, i64, f64),
 }
 
 /// トップハット済みの画像で、パネルのラベルを予想位置の ±LABEL_SEARCH px で探し、(dx, dy, 一致度) を返す
 fn panel_offset(mx: &Image<u8>, t: &Templates) -> (i64, i64, f64) {
-    let (x0, y0, x1, y1) = LABEL_BLOCK;
-    let r = LABEL_SEARCH;
-    let win = tophat_region(mx, (x0 - r, y0 - r, x1 + r, y1 + r));
-    let (v, (x, y)) = max_loc(&match_template(&win, &t.label, None));
-    (x as i64 - r as i64, y as i64 - r as i64, v as f64)
+    block_offset(mx, &t.label, LABEL_BLOCK, LABEL_SEARCH)
+}
+
+/// トップハット済みの画像で、固定の文字のかたまり (block の位置の見本 tmpl) を予想位置の ±r px で探し、
+/// (dx, dy, 一致度) を返す。探す範囲は画面の中に収める
+fn block_offset(mx: &Image<u8>, tmpl: &Image<u8>, block: Rect, r: usize) -> (i64, i64, f64) {
+    let (x0, y0, x1, y1) = block;
+    let (wx0, wy0) = (x0.saturating_sub(r), y0.saturating_sub(r));
+    let (wx1, wy1) = ((x1 + r).min(mx.width()), (y1 + r).min(mx.height()));
+    let win = tophat_region(mx, (wx0, wy0, wx1, wy1));
+    let (v, (x, y)) = max_loc(&match_template(&win, tmpl, None));
+    (
+        (wx0 + x) as i64 - x0 as i64,
+        (wy0 + y) as i64 - y0 as i64,
+        v as f64,
+    )
+}
+
+/// 鑑定ボックスの見出しを予想位置の ±HEADING_SEARCH px で探し、(dx, dy, 一致度) を返す
+fn heading_offset(mx: &Image<u8>, t: &Templates) -> (i64, i64, f64) {
+    block_offset(mx, &t.heading, HEADING_BLOCK, HEADING_SEARCH)
 }
 
 /// 位置合わせ後の画面 (1280x720 の RGBA) を読む
 pub fn read_screen(screen: &RgbaView, t: &Templates) -> ScreenRead {
     let mut mx = color::max_channel(screen);
     let panel = panel_offset(&mx, t);
+    // 鑑定ボックスの見出しは、パネルのずれを戻す前の画像で探す (パネルとボックスは離れていて、ずれ方が違うため)
+    let heading = heading_offset(&mx, t);
+    let index = read_index(screen, heading);
     if panel.2 >= LABEL_MIN_SCORE {
         // ラベルが確かに見つかったときだけ、そのずれの分だけ画像を戻してから読む
         mx = translate(&mx, panel.0 as i32, panel.1 as i32);
@@ -744,7 +818,8 @@ pub fn read_screen(screen: &RgbaView, t: &Templates) -> ScreenRead {
         slots,
         slot_scores,
         panel,
-        index: read_index(screen),
+        index,
+        heading,
     }
 }
 

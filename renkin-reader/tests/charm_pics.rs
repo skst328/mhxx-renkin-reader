@@ -17,10 +17,18 @@ mod e2e;
 use std::path::{Path, PathBuf};
 
 /// 期待と違うことがわかっていて、許しているもの (名前, 理由)
-const KNOWN: &[(&str, &str)] = &[(
-    "synthetic/photos/001/PXL_20261018_134214292.jpg",
-    "JPEG の開き方の違い (Rust の image と OpenCV の libjpeg-turbo) でパネルが見つからない。OpenCV で開いた画素なら読める",
-)];
+const KNOWN: &[(&str, &str)] = &[
+    (
+        "synthetic/photos/001/PXL_20261018_134214292.jpg",
+        "JPEG の開き方の違い (Rust の image と OpenCV の libjpeg-turbo) でパネルが見つからない (写真の SIFT で 2 倍拡大を \
+         するとき。OpenCV で開いた画素なら読める)",
+    ),
+    (
+        "tests/005/IMG_0131.HEIC",
+        "画面がとても小さく写っている (縮めた画像で画面 1px が 0.46px) ので、写真の SIFT で 2 倍拡大をしないと位置合わせ \
+         できずに撮り直しになる (vision::align::PHOTO_UPSCALE)",
+    ),
+];
 
 fn charm_pics() -> PathBuf {
     std::env::var("CHARM_PICS")

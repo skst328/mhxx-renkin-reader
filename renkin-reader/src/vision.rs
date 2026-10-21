@@ -191,6 +191,7 @@ fn to_result(r: &ScreenRead, mut diagnostics: Diagnostics) -> ReadResult {
             read::SLOT_MIN_DIFF,
             true,
         ),
+        // 何個目かは、分からなければ自信ありの「不明」を返す (read::read_index)
         index: field(&r.index, |v| v, read::INDEX_MIN_SCORE, f64::MIN, true),
     };
     ReadResult::Read {
