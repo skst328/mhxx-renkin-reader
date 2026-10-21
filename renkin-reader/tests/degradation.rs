@@ -337,6 +337,24 @@ fn dump(dir: &Path, name: &str, kind: &str, level: f64, photo: &Img, screen: Opt
             image::ExtendedColorType::Rgba8,
         )
         .unwrap();
+        // スキル名とポイントの欄 (x 650〜850, y 160〜222) を 6 倍に拡大したもの (目で見る用)
+        let (x0, y0, w, h, k) = (650usize, 160usize, 200usize, 62usize, 6usize);
+        let mut px = vec![0u8; w * k * h * k * 4];
+        for y in 0..h * k {
+            for x in 0..w * k {
+                let s = ((y0 + y / k) * 1280 + x0 + x / k) * 4;
+                let d = (y * w * k + x) * 4;
+                px[d..d + 4].copy_from_slice(&screen[s..s + 4]);
+            }
+        }
+        image::save_buffer(
+            dir.join(format!("{base}_fields.png")),
+            &px,
+            (w * k) as u32,
+            (h * k) as u32,
+            image::ExtendedColorType::Rgba8,
+        )
+        .unwrap();
     }
 }
 
@@ -435,6 +453,69 @@ fn no_slips_under_degradation() {
                 let index_slip = index_ok == Some(false) && index_sure;
                 if let Outcome::Wrong(m) = &outcome {
                     println!("すり抜け: {} {kind} {level}: {m}", a.name);
+                    // どの欄がどんな点数で選ばれたか (1 位の点数、2 位との差、候補)
+                    if let ReadResult::Read { fields, .. } = &r {
+                        let show = |name: &str, f: String| println!("    {name}: {f}");
+                        let fmt = |v: String, f: (f32, f32), c: String| {
+                            format!("{v} (点数 {:.3}, 差 {:.3}) 候補 {c}", f.0, f.1)
+                        };
+                        show(
+                            "skill1",
+                            fmt(
+                                format!("{:?}", fields.skill1.value),
+                                (fields.skill1.score, fields.skill1.margin),
+                                fields
+                                    .skill1
+                                    .candidates
+                                    .iter()
+                                    .map(|c| format!("{:?}:{:.3}", c.value, c.score))
+                                    .collect::<Vec<_>>()
+                                    .join(" "),
+                            ),
+                        );
+                        show(
+                            "pts1",
+                            fmt(
+                                format!("{:?}", fields.pts1.value),
+                                (fields.pts1.score, fields.pts1.margin),
+                                fields
+                                    .pts1
+                                    .candidates
+                                    .iter()
+                                    .map(|c| format!("{:?}:{:.3}", c.value, c.score))
+                                    .collect::<Vec<_>>()
+                                    .join(" "),
+                            ),
+                        );
+                        show(
+                            "skill2",
+                            fmt(
+                                format!("{:?}", fields.skill2.value),
+                                (fields.skill2.score, fields.skill2.margin),
+                                fields
+                                    .skill2
+                                    .candidates
+                                    .iter()
+                                    .map(|c| format!("{:?}:{:.3}", c.value, c.score))
+                                    .collect::<Vec<_>>()
+                                    .join(" "),
+                            ),
+                        );
+                        show(
+                            "pts2",
+                            fmt(
+                                format!("{:?}", fields.pts2.value),
+                                (fields.pts2.score, fields.pts2.margin),
+                                fields
+                                    .pts2
+                                    .candidates
+                                    .iter()
+                                    .map(|c| format!("{:?}:{:.3}", c.value, c.score))
+                                    .collect::<Vec<_>>()
+                                    .join(" "),
+                            ),
+                        );
+                    }
                 }
                 if index_slip {
                     println!("何個目かのすり抜け: {} {kind} {level}", a.name);

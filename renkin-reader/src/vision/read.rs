@@ -152,6 +152,12 @@ impl Templates {
 
 /// 当たった範囲の外に残った文字の割合 x これ を、照合の一致度から引く
 pub const LEFTOVER_PENALTY: f64 = 1.0;
+/// 「当たった範囲」を見本の左右に何 px 広げるか (位置合わせの誤差やにじみの分)。スキル名
+pub const NAME_SLACK: usize = 2;
+/// 同じく数字。スキル名より狭くする: ぼけて隙間が埋まった「3」(幅 10px ほどの塊) に細い「1」(幅 6px) が当たったとき、
+/// 2px 広げると範囲が 10px になって塊をほぼ覆い、はみ出しが減点されずに自信ありで「1」と読んでしまう。
+/// 0 にすると、画面が小さく写った写真の字のにじみ (1px ほど) まで減点されて、ふつうの写真が撮り直しになる
+pub const DIGIT_SLACK: usize = 1;
 /// 1 位と 2 位の差がこれ未満なら、2 つの見本で画素が違うところ (とその周り) だけで比べ直す
 pub const RECHECK_MARGIN: f64 = 0.2;
 /// 違う画素の周りに広げる幅 (正方形の一辺)
@@ -306,14 +312,17 @@ pub struct Scored<T> {
     pub candidates: Vec<(T, f64)>,
 }
 
-/// 各候補の一致度から「当たった範囲の外に残った文字の割合」を引いた点数で選ぶ。
+/// 各候補の一致度から「当たった範囲 (見本の左右に slack px 広げた範囲) の外に残った文字の割合」を引いた点数で選ぶ。
 /// 1 位と 2 位が近ければ、2 つの見本で画素が違うところだけで比べ直す (max_diff があれば、似ている組み合わせだけ)。
-/// 比べ直しでも同じ 1 位なら差は名前全体と比べ直しの大きいほう、1 位が入れ替わったら差を 0 にする
+/// 比べ直しでも同じ 1 位なら差は名前全体と比べ直しの大きいほう (widen が false なら名前全体の差のまま)、
+/// 1 位が入れ替わったら差を 0 にする
 pub fn best_match<K: Copy>(
     roi: &Image<u8>,
     tmpls: &[(K, Scaled)],
     x_range: Option<(usize, usize)>,
     max_diff: Option<f64>,
+    slack: usize,
+    widen: bool,
 ) -> Scored<K> {
     let cols = ink_columns(roi);
     let total = cols.iter().sum::<u32>().max(1) as f64;
@@ -326,7 +335,8 @@ pub fn best_match<K: Copy>(
                 let Some((v, (x, _))) = match_best(roi, t, x_range) else {
                     continue;
                 };
-                let inside: u32 = cols[x.saturating_sub(2)..(x + t.width() + 2).min(cols.len())]
+                let inside: u32 = cols
+                    [x.saturating_sub(slack)..(x + t.width() + slack).min(cols.len())]
                     .iter()
                     .sum();
                 let score = v - LEFTOVER_PENALTY * (total - inside as f64) / total;
@@ -352,10 +362,12 @@ pub fn best_match<K: Copy>(
             && max_diff.is_none_or(|m| pair_diff(ta, tb) <= m)
             && let Some((la, lb)) = recheck(roi, ta, tb, x_range)
         {
-            margin = if la >= lb {
+            margin = if la < lb {
+                0.0
+            } else if widen {
                 (sa - sb).max(la - lb)
             } else {
-                0.0
+                sa - sb
             };
         }
     }
@@ -520,6 +532,10 @@ fn read_points(roi: &Image<u8>, t: &Templates) -> (Scored<i8>, (f64, f64)) {
         &t.digits,
         None,
         None,
+        DIGIT_SLACK,
+        // 比べ直しも見本の窓の中で比べるので、細い「1」がぼけた太い「3」の一部分に当たって得をする。数字では
+        // 比べ直しで差を広げず、1 位が入れ替わったときに自信なしにするだけにする
+        false,
     );
     let s = read_sign(roi, sign, t);
     let signed = |d: u8| if s.1 > s.0 { -(d as i8) } else { d as i8 };
@@ -663,7 +679,14 @@ pub fn read_screen(screen: &RgbaView, t: &Templates) -> ScreenRead {
     let roi = |rect: Rect| tophat_region(&mx, rect);
     let left = NAME_LEFT - NAME1.0; // 名前の左端 (欄の座標)
     let names = Some((left - NAME_SEARCH, left + NAME_SEARCH));
-    let skill1 = best_match(&roi(NAME1), &t.skills, names, Some(RECHECK_MAX_DIFF));
+    let skill1 = best_match(
+        &roi(NAME1),
+        &t.skills,
+        names,
+        Some(RECHECK_MAX_DIFF),
+        NAME_SLACK,
+        true,
+    );
     let name2 = roi(NAME2);
     let skill2 = if is_dashes(&name2) {
         Scored {
@@ -673,7 +696,14 @@ pub fn read_screen(screen: &RgbaView, t: &Templates) -> ScreenRead {
             candidates: vec![(None, 1.0)],
         }
     } else {
-        let s = best_match(&name2, &t.skills, names, Some(RECHECK_MAX_DIFF));
+        let s = best_match(
+            &name2,
+            &t.skills,
+            names,
+            Some(RECHECK_MAX_DIFF),
+            NAME_SLACK,
+            true,
+        );
         Scored {
             value: Some(s.value),
             score: s.score,
