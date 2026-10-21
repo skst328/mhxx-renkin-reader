@@ -82,10 +82,6 @@ pub struct Diagnostics {
     #[serde(skip_serializing_if = "Option::is_none")]
     #[cfg_attr(all(target_arch = "wasm32", target_os = "unknown"), tsify(optional))]
     pub resolution: Option<f32>,
-    /// 左右反転した写真として読んだか
-    #[serde(skip_serializing_if = "Option::is_none")]
-    #[cfg_attr(all(target_arch = "wasm32", target_os = "unknown"), tsify(optional))]
-    pub mirrored: Option<bool>,
     /// パネルの固定ラベルの一致度
     #[serde(skip_serializing_if = "Option::is_none")]
     #[cfg_attr(all(target_arch = "wasm32", target_os = "unknown"), tsify(optional))]

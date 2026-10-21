@@ -134,7 +134,7 @@ impl<'a> RgbaView<'a> {
 /// RGB の画素
 pub type Rgb = [u8; 3];
 
-/// RGB の画素を読める画像 (JS から受け取った RGBA、縮小した RGB の画像、左右反転して読む写真)
+/// RGB の画素を読める画像 (JS から受け取った RGBA、縮小した RGB の画像)
 pub trait RgbSource {
     fn width(&self) -> usize;
     fn height(&self) -> usize;
@@ -178,25 +178,6 @@ impl RgbSource for Image<Rgb> {
     }
     fn read_row(&self, y: usize, out: &mut [Rgb]) {
         out.copy_from_slice(self.row(y));
-    }
-}
-
-/// 左右反転して読む (コピーしない)。インカメラなどで反転して保存された写真の試し直しに使う
-pub struct Flipped<'a, S: RgbSource>(pub &'a S);
-
-impl<S: RgbSource> RgbSource for Flipped<'_, S> {
-    fn width(&self) -> usize {
-        self.0.width()
-    }
-    fn height(&self) -> usize {
-        self.0.height()
-    }
-    fn rgb(&self, x: usize, y: usize) -> Rgb {
-        self.0.rgb(self.0.width() - 1 - x, y)
-    }
-    fn read_row(&self, y: usize, out: &mut [Rgb]) {
-        self.0.read_row(y, out);
-        out.reverse();
     }
 }
 

@@ -3,13 +3,14 @@
 //! 1. 型紙 (どの場面でも同じ不透明な UI だけを残した画像) と SIFT の特徴点を対応づけ、RANSAC で射影変換 H を求める
 //! 2. パネルなどの角の黄色い飾り (角飾り) を近い目印に対応づけて、H を解き直す (許容誤差を 10 → 6 → 4px と縮める)
 //! 3. 鑑定ボックスのマス目の交点を、画面の座標に写した画像の上で予想位置のまわりから探し、H を解き直す (2 回)
-//! 4. 交点が少ない・裏返し・極端に細長い・潰れた H は失敗。失敗したら、1 対 1 の対応づけ、左右反転の順に試し直す
+//! 4. 交点が少ない・極端に細長い・潰れた H は失敗。失敗したら、1 対 1 の対応づけで試し直す
+//!    (左右反転して保存された写真も、反転を含む H がそのまま求まるので、写した画面は正しい向きになって読める)
 //! 5. 合っても、文字のある所で画面 1px が写真の 0.5px 未満なら、文字が小さすぎるので失敗
 
 use super::assets;
 use super::cv::color;
 use super::cv::components::connected_components;
-use super::cv::image::{Flipped, Image, Rgb, RgbSource};
+use super::cv::image::{Image, Rgb, RgbSource};
 use super::cv::knn::{DMatch, knn2};
 use super::cv::linalg::{Mat3, cond3, inv3, mul3, singular_values2};
 use super::cv::matching::{match_template, max_loc};
@@ -139,7 +140,7 @@ struct Prepared {
     knn: Vec<Option<(DMatch, DMatch)>>,
 }
 
-/// 1 回の試し (そのまま / 1 対 1 / 左右反転) の失敗
+/// 1 回の試し (そのまま / 1 対 1) の失敗
 struct Failure {
     diagnostics: Diagnostics,
 }
@@ -187,17 +188,6 @@ fn resolution(h: &Mat3) -> f64 {
         .iter()
         .map(|&p| local_stretch(&hinv, p).1)
         .fold(f64::INFINITY, f64::min)
-}
-
-/// 写真を画面に写す H が裏返しか: 画面中央に対応する写真上の点のまわりの三角形を写し、頂点の回る向きを見る
-fn is_mirrored(h: &Mat3) -> bool {
-    let Some(hinv) = inv3(h) else { return false };
-    let c = transform_point(&hinv, [640.0, 360.0]);
-    let a = transform_point(h, c);
-    let b = transform_point(h, [c[0] + 10.0, c[1]]);
-    let d = transform_point(h, [c[0], c[1] + 10.0]);
-    let (u, v) = ([b[0] - a[0], b[1] - a[1]], [d[0] - a[0], d[1] - a[1]]);
-    ((u[0] * v[1] - u[1] * v[0]) as f64) < 0.0
 }
 
 /// 角飾りの候補 (写真の座標): 黄色で正方形に近い小さな塊をすべて拾う (どれが本物かは位置で決める)
@@ -271,7 +261,7 @@ impl Aligner {
         Ok(aligned)
     }
 
-    /// そのまま → 1 対 1 → 左右反転 (そのまま、1 対 1) の順に試す。
+    /// そのまま → 1 対 1 の順に試す。失敗したら、最初 (そのまま) の途中経過を返す。
     /// 1 対 1 の試し直しは対応の選び方だけが違うので、縮小・特徴点・総当たりの対応は使い回す
     fn align_any(&self, photo: &impl RgbSource) -> Result<Aligned, Failure> {
         let prep = self.prepare(photo);
@@ -279,23 +269,7 @@ impl Aligner {
             Ok(a) => return Ok(a),
             Err(f) => f,
         };
-        if let Ok(a) = self.align_once(photo, &prep, true) {
-            return Ok(a);
-        }
-        let flipped = Flipped(photo);
-        let prep = self.prepare(&flipped);
-        let mut a = self
-            .align_once(&flipped, &prep, false)
-            .or_else(|_| self.align_once(&flipped, &prep, true))
-            .map_err(|_| first)?;
-        a.diagnostics.mirrored = Some(true);
-        // 反転した写真の x は (幅 - 1 - x)。渡された写真の座標 → 反転した写真の座標 → 画面の座標
-        let w = photo.width() as f64;
-        a.h = mul3(
-            &a.h,
-            &[[-1.0, 0.0, w - 1.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]],
-        );
-        Ok(a)
+        self.align_once(photo, &prep, true).map_err(|_| first)
     }
 
     /// 下ごしらえ: 写真を縮小し、特徴点を取って、型紙の特徴点と総当たりで対応づける
@@ -326,17 +300,14 @@ impl Aligner {
         Prepared { s, small, kps, knn }
     }
 
-    /// 1 回の位置合わせ (反転は試さない)。unique なら、型紙の 1 つの特徴点に写真の特徴点を 1 つだけ対応させる
+    /// 1 回の位置合わせ。unique なら、型紙の 1 つの特徴点に写真の特徴点を 1 つだけ対応させる
     fn align_once(
         &self,
         photo: &impl RgbSource,
         prep: &Prepared,
         unique: bool,
     ) -> Result<Aligned, Failure> {
-        let mut diag = Diagnostics {
-            mirrored: Some(false),
-            ..Default::default()
-        };
+        let mut diag = Diagnostics::default();
         let fail = |diag: &Diagnostics| Failure {
             diagnostics: diag.clone(),
         };
@@ -391,7 +362,7 @@ impl Aligner {
             self.refine_with_grid(small, h, &src, &dst, &cs, &cd)
         });
         diag.grid = Some(n_grid as u32);
-        if n_grid < GRID_MIN_POINTS || is_mirrored(&h) {
+        if n_grid < GRID_MIN_POINTS {
             return Err(fail(&diag));
         }
         let aniso = round2(anisotropy(&h));
