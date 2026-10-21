@@ -315,10 +315,30 @@ impl Rng {
     }
 }
 
-/// すり抜けた画像を書き出す: <名前>__<劣化><強さ>_photo.png (長い辺 1600px) と _screen.png (位置合わせ後の画面)
-fn dump(dir: &Path, name: &str, kind: &str, level: f64, photo: &Img, screen: Option<&[u8]>) {
+/// すり抜けた画像を書き出す: <名前>__<劣化><強さ>_photo.png (長い辺 1600px)、_screen.png (位置合わせ後の画面)、
+/// _clean.png (劣化前の位置合わせ後の画面)、_fields.png (スキル名とポイントの欄を拡大したもの)
+fn dump(
+    dir: &Path,
+    name: &str,
+    kind: &str,
+    level: f64,
+    photo: &Img,
+    screen: Option<&[u8]>,
+    clean: Option<&[u8]>,
+) {
     std::fs::create_dir_all(dir).unwrap();
     let base = format!("{}__{kind}{level}", name.replace('/', "__"));
+    // 劣化前の位置合わせ後の画面 (_clean.png)
+    if let Some(clean) = clean {
+        image::save_buffer(
+            dir.join(format!("{base}_clean.png")),
+            clean,
+            1280,
+            720,
+            image::ExtendedColorType::Rgba8,
+        )
+        .unwrap();
+    }
     let small = resize_area(photo, (1600.0 / photo.w.max(photo.h) as f64).min(1.0));
     image::save_buffer(
         dir.join(format!("{base}_photo.png")),
@@ -430,6 +450,8 @@ fn no_slips_under_degradation() {
             let img = open(a);
             // 劣化前に期待どおりに読めて、位置合わせの結果 (画面の大きさとパネルの位置) が分かるものだけを使う
             let clean = reader.read(&img.px, img.w as u32, img.h as u32).unwrap();
+            // 劣化前の位置合わせ後の画面 (すり抜けを書き出すときに並べる)
+            let clean_screen = reader.aligned_image().map(<[u8]>::to_vec);
             let (p0, p1, center) = (
                 reader.screen_to_photo(0.0, 0.0),
                 reader.screen_to_photo(1280.0, 0.0),
@@ -517,8 +539,34 @@ fn no_slips_under_degradation() {
                         );
                     }
                 }
+                if index_slip || matches!(outcome, Outcome::Wrong(_)) {
+                    // 位置合わせの途中経過 (劣化前と劣化後)
+                    let diag = |r: &ReadResult| match r {
+                        ReadResult::Read { diagnostics, .. }
+                        | ReadResult::Rejected { diagnostics, .. } => {
+                            format!("{diagnostics:?}")
+                        }
+                    };
+                    println!("    位置合わせ (劣化前): {}", diag(&clean));
+                    println!("    位置合わせ (劣化後): {}", diag(&r));
+                }
                 if index_slip {
                     println!("何個目かのすり抜け: {} {kind} {level}", a.name);
+                    if let ReadResult::Read { fields, .. } = &r {
+                        let f = &fields.index;
+                        println!(
+                            "    index: {:?} (点数 {:.3}, 差 {:.3}) 候補 {} / 正解 {:?}",
+                            f.value,
+                            f.score,
+                            f.margin,
+                            f.candidates
+                                .iter()
+                                .map(|c| format!("{:?}:{:.3}", c.value, c.score))
+                                .collect::<Vec<_>>()
+                                .join(" "),
+                            a.index
+                        );
+                    }
                 }
                 if let (Ok(dir), true) = (
                     std::env::var("RENKIN_DUMP"),
@@ -531,6 +579,7 @@ fn no_slips_under_degradation() {
                         level,
                         &out,
                         reader.aligned_image(),
+                        clean_screen.as_deref(),
                     );
                 }
                 mine.push((a.name.clone(), kind, level, outcome, index_slip));

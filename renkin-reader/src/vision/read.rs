@@ -34,6 +34,10 @@ pub const NAME_SEARCH: usize = 4;
 pub const LABEL_SEARCH: usize = 30;
 /// ラベルの一致度がこれ未満なら、パネルの位置を確かめられない (ずれを戻さない)
 pub const LABEL_MIN_SCORE: f64 = 0.5;
+/// ラベルが予想位置から縦か横にこれより大きくずれていたら、位置合わせがおかしい (撮り直し)。
+/// ふつうの写真のずれは 0〜3px (charm-pics の 287 枚)。暗い写真などで最初の変換がずれ、鑑定ボックスのマス目の交点に
+/// マス 1 つ分ずれて吸い付くと、マス目の交点はたくさん見つかって通ってしまうが、ラベルは 20px ほどずれる
+pub const MAX_LABEL_OFFSET: i64 = 8;
 
 /// (左, 上, 右, 下)。右と下は含まない
 pub type Rect = (usize, usize, usize, usize);

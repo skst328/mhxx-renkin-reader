@@ -143,12 +143,20 @@ fn field<T: Copy, U>(
     }
 }
 
-/// 画面を読んだ結果を、TS に返す形にする。パネルのラベルが見つからなければ、どの欄も信用できないので Rejected
+/// 画面を読んだ結果を、TS に返す形にする。パネルのラベルが見つからなければ、どの欄も信用できないので Rejected。
+/// ラベルが予想位置から大きくずれていれば、位置合わせがおかしいので Rejected (NotAligned)
 fn to_result(r: &ScreenRead, mut diagnostics: Diagnostics) -> ReadResult {
     diagnostics.panel_score = Some(r.panel.2 as f32);
     if r.panel.2 < read::LABEL_MIN_SCORE {
         return ReadResult::Rejected {
             reason: RejectReason::PanelNotFound,
+            diagnostics,
+            timings: Vec::new(),
+        };
+    }
+    if r.panel.0.abs().max(r.panel.1.abs()) > read::MAX_LABEL_OFFSET {
+        return ReadResult::Rejected {
+            reason: RejectReason::NotAligned,
             diagnostics,
             timings: Vec::new(),
         };
