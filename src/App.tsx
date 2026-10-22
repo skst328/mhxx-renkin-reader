@@ -415,40 +415,45 @@ export default function App() {
             <div ref={tablistRef} role="tablist" className="flex scroll-mt-2 items-end gap-1 border-b">
               {tabs.map((t, i) => {
                 const selected = t.id === active.id
+                const closable = tabs.length > 1
+                // 中身の要約は出さず、読み取りの状態だけを印で示す (読み取り中・撮り直し・確かめる欄あり・読み取り済み。
+                // 写真なしで手入力したタブには付けない)。読み取れたタブは、自信のない欄が残っていれば警告、なければ成功
+                // (欄を確かめて直すと成功になる)
+                const status =
+                  t.stage === 'reading' ? (
+                    <LoaderCircleIcon role="img" aria-label="読み取り中" className="size-3.5 shrink-0 animate-spin text-primary" />
+                  ) : t.stage === 'rejected' || t.error ? (
+                    <AlertCircleIcon role="img" aria-label="撮り直し" className="size-3.5 shrink-0 text-destructive" />
+                  ) : t.stage === 'edit' ? (
+                    Object.keys(t.unsure).length > 0 ? (
+                      <TriangleAlertIcon role="img" aria-label="確かめる欄あり" className="size-3.5 shrink-0 text-warning" />
+                    ) : (
+                      <CircleCheckIcon role="img" aria-label="読み取り済み" className="size-3.5 shrink-0 text-success" />
+                    )
+                  ) : null
                 return (
-                  // 消す × はタブの右端に重ねる (ボタンの中にボタンは置けないので、外側で包む)。VS Code のように、
-                  // 開いているタブでは常に、ほかのタブではマウスを乗せたときだけ出す。タブが 1 つなら出さない
-                  <div key={t.id} className="group relative -mb-px flex min-w-0 flex-1 sm:max-w-40">
+                  // 見出しは番号と印だけ (狭い幅でタブが 4 つ並ぶと 1 つ 70px ほどしかないので「護石」は付けない。
+                  // 読み上げ用の名前には付ける)。消す × はタブの右端に重ねる (ボタンの中にボタンは置けないので、外側で包む)。
+                  // VS Code のように、開いているタブでは常に、ほかのタブではマウスを乗せたときだけ出す。タブが 1 つなら出さない
+                  <div key={t.id} className="group relative -mb-px flex min-w-0 flex-1 sm:max-w-28">
                     <button
                       type="button"
                       role="tab"
                       aria-selected={selected}
                       onClick={() => setActiveId(t.id)}
                       className={cn(
-                        'flex min-w-0 flex-1 items-center gap-1.5 rounded-t-lg border border-transparent py-2 pl-3 text-left text-sm font-medium',
-                        tabs.length > 1 ? 'pr-7 sm:pr-9' : 'pr-3',
+                        'flex min-w-0 flex-1 items-center gap-1.5 rounded-t-lg border border-transparent py-2 pl-3 text-left text-sm font-medium tabular-nums',
+                        closable ? 'pr-7 sm:pr-9' : 'pr-3',
                         selected ? 'border-border border-b-card bg-card' : 'text-muted-foreground hover:bg-muted/50',
                       )}
                     >
-                      <span className="whitespace-nowrap">護石 {i + 1}</span>
-                      {/* 中身の要約は出さず、読み取りの状態だけを印で示す (読み取り中・撮り直し・確かめる欄あり・読み取り済み。
-                          写真なしで手入力したタブには付けない) */}
-                      {t.stage === 'reading' && (
-                        <LoaderCircleIcon aria-label="読み取り中" className="size-3.5 shrink-0 animate-spin text-primary" />
-                      )}
-                      {(t.stage === 'rejected' || t.error) && (
-                        <AlertCircleIcon aria-label="撮り直し" className="size-3.5 shrink-0 text-destructive" />
-                      )}
-                      {/* 読み取れたタブ: 自信のない欄が残っていれば警告、なければ成功 (欄を確かめて直すと成功になる) */}
-                      {t.stage === 'edit' &&
-                        !t.error &&
-                        (Object.keys(t.unsure).length > 0 ? (
-                          <TriangleAlertIcon aria-label="確かめる欄あり" className="size-3.5 shrink-0 text-warning" />
-                        ) : (
-                          <CircleCheckIcon aria-label="読み取り済み" className="size-3.5 shrink-0 text-success" />
-                        ))}
+                      <span>
+                        <span className="sr-only">護石 </span>
+                        {i + 1}
+                      </span>
+                      {status}
                     </button>
-                    {tabs.length > 1 && (
+                    {closable && (
                       <Button
                         variant="ghost"
                         size="icon-xs"
