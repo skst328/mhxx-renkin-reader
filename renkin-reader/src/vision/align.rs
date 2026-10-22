@@ -23,7 +23,9 @@ use crate::types::{Diagnostics, RejectReason};
 
 /// 位置合わせ後の画面の大きさ
 pub const SCREEN: (usize, usize) = (1280, 720);
-/// 写真をこの長辺にそろえてから特徴点を取る (大きい写真は縮め、小さい画像は拡大する)
+/// 写真をこの長辺にそろえてから特徴点を取る (大きい写真は縮め、小さい画像は拡大する)。
+/// 写真の SIFT で 2 倍拡大をしないとき、1800 にすると charm-pics の写真で撮り直しが 3 枚増える
+/// (位置合わせの精度が落ちて、パネルのラベルが見つからなくなったり、スキル名が自信なしになったりする)
 pub const WORK_LONG_SIDE: f64 = 2000.0;
 /// SIFT の特徴点の数の上限
 pub const SIFT_FEATURES: usize = 8000;
