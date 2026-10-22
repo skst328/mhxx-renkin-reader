@@ -86,6 +86,11 @@ async function handle(request: WorkerRequest): Promise<void> {
     case 'search': {
       const { id, charm, index, start, end } = request
       const found: FrameCandidate[] = []
+      // 列で待っている間に中止されていたら、始めずに終える
+      if (cancelled.delete(id)) {
+        post({ id, type: 'cancelled' })
+        return
+      }
       for (let a = start; a < end; a = Math.min(a + CHUNK, end)) {
         found.push(...searchFrames(charm, index, a, Math.min(a + CHUNK, end)))
         post({ id, type: 'progress', done: Math.min(a + CHUNK, end) - start, total: end - start })
@@ -102,14 +107,18 @@ async function handle(request: WorkerRequest): Promise<void> {
   }
 }
 
+/** 前の依頼が終わるまで次を始めないための列。写真を何枚か選ぶと読み取りの依頼がまとめて届くが、handle は途中で
+ * await するので、そのまま始めると何枚もの写真を同時に開いてメモリを食う (スマホだとページごと落とされうる) */
+let queue = Promise.resolve()
+
 self.onmessage = (event: MessageEvent<WorkerRequest>) => {
   const request = event.data
-  // 中止は、探索の区切りを待たずにすぐ受け付ける (ready を待つ handle に回さない)
+  // 中止は、探索の区切りを待たずにすぐ受け付ける (列に並ばせない)
   if (request.type === 'cancel') {
     cancelled.add(request.target)
     return
   }
-  handle(request).catch((e: unknown) => {
+  queue = queue.then(() => handle(request)).catch((e: unknown) => {
     // 写真を開けなかっただけなら続けて使える。それ以外 (wasm の中で落ちたなど) は wasm の状態が信用できないので、
     // ページ側にこの Worker を捨ててもらう
     const fatal = !(e instanceof DecodeError)

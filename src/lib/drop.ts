@@ -8,7 +8,7 @@ import { useEffect, useRef, useState } from 'react'
  *
  * 戻り値はファイルをドラッグ中かどうか。呼ぶ側が目印を出すのに使う
  */
-export function useWindowFileDrop(onDrop: (file: File) => void, disabled = false): boolean {
+export function useWindowFileDrop(onDrop: (files: File[]) => void, disabled = false): boolean {
   const [dragging, setDragging] = useState(false)
   // dragenter と dragleave は子要素をまたぐたびに飛ぶので、数えないとちらつく
   const depth = useRef(0)
@@ -40,8 +40,8 @@ export function useWindowFileDrop(onDrop: (file: File) => void, disabled = false
       e.preventDefault()
       depth.current = 0
       setDragging(false)
-      const file = e.dataTransfer?.files?.[0]
-      if (file && !disabled) latest.current(file)
+      const files = [...(e.dataTransfer?.files ?? [])]
+      if (files.length > 0 && !disabled) latest.current(files)
     }
 
     window.addEventListener('dragenter', onEnter)

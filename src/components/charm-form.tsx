@@ -103,7 +103,7 @@ export function CharmForm({
     }))
 
   return (
-    <div className="flex flex-col gap-6">
+    <div className="flex flex-col gap-4 sm:gap-6">
       <Row label="第1スキル" htmlFor="skill1" status={status(['skill1', 'pts1'], 'skill1')}>
         <SkillCombobox
           id="skill1"
@@ -179,8 +179,9 @@ function Row({
   children: ReactNode
 }) {
   return (
-    <div className="grid gap-2 sm:grid-cols-[8.5rem_1fr] sm:items-start sm:gap-x-4">
-      <Label htmlFor={htmlFor} className="pt-2 text-sm font-normal text-muted-foreground">
+    // 狭い幅では見出しを欄の上に置くので、見出しと欄の間を詰める (横に並べるときは欄の文字の高さに合わせて下げる)
+    <div className="grid gap-1.5 sm:grid-cols-[8.5rem_1fr] sm:items-start sm:gap-x-4 sm:gap-y-2">
+      <Label htmlFor={htmlFor} className="text-sm font-normal text-muted-foreground sm:pt-2">
         {label}
       </Label>
       <div className="flex flex-col gap-1.5">

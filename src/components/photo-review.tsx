@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react'
 import { Dialog as DialogPrimitive } from '@base-ui/react/dialog'
-import { ImageIcon, XIcon } from 'lucide-react'
+import { ImageIcon, LoaderCircleIcon, XIcon } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogClose, DialogOverlay, DialogPortal, DialogTitle, DialogTrigger } from '@/components/ui/dialog'
@@ -32,17 +32,38 @@ export function AlignedScreen({ src }: { src: string }) {
   )
 }
 
-/** 写真を読む前 (と読めなかったとき) に、読み取った画面の場所に置く空の枠 (同じ大きさで、カードの形を変えないため) */
-export function ScreenPlaceholder({ failed = false, className }: { failed?: boolean; className?: string }) {
+/** 写真を読む前 (と読み取り中、読めなかったとき) に、読み取った画面の場所に置く空の枠 (同じ大きさで、カードの形を
+ * 変えないため)。読み取り中は、動いていることが分かるように回るアイコンと流れる線を出す */
+export function ScreenPlaceholder({
+  failed = false,
+  reading = false,
+  className,
+}: {
+  failed?: boolean
+  reading?: boolean
+  className?: string
+}) {
   return (
-    <figure className={cn('space-y-2 rounded-xl border bg-muted/50 p-3', className)}>
+    <figure className={cn('space-y-1.5 rounded-xl border bg-muted/50 p-2 md:space-y-2 md:p-3', className)}>
       <figcaption className="text-sm text-muted-foreground">読み取った画面</figcaption>
       <div
         className="flex flex-col items-center justify-center gap-2 rounded-lg border-2 border-dashed text-center text-sm text-muted-foreground"
         style={{ aspectRatio: `${CROP.width} / ${CROP.height}` }}
       >
-        <ImageIcon className="size-6" />
-        {failed ? '画面を読み取れませんでした' : '写真を読むと、ここに読み取った画面が出ます'}
+        {reading ? (
+          <>
+            <LoaderCircleIcon className="size-8 animate-spin text-primary" />
+            <p className="font-medium text-foreground">護石を読み取っています…</p>
+            <div className="h-1 w-40 overflow-hidden rounded-full bg-muted">
+              <div className="h-full w-1/3 animate-indeterminate rounded-full bg-primary" />
+            </div>
+          </>
+        ) : (
+          <>
+            <ImageIcon className="size-6" />
+            {failed ? '画面を読み取れませんでした' : '写真を読むと、ここに読み取った画面が出ます'}
+          </>
+        )}
       </div>
     </figure>
   )
@@ -64,7 +85,14 @@ function Figure({
   children: ReactNode
 }) {
   return (
-    <figure className={cn('space-y-1', framed && 'space-y-2 rounded-xl border bg-muted/50 p-3', className)}>
+    <figure
+      className={cn(
+        'space-y-1',
+        // 狭い幅では画面を少しでも大きく見せるため、枠の内側を詰める (横並びのときは右の見出しと高さを揃える)
+        framed && 'space-y-1.5 rounded-xl border bg-muted/50 p-2 md:space-y-2 md:p-3',
+        className,
+      )}
+    >
       <figcaption className="text-sm text-muted-foreground">{caption}</figcaption>
       {/* 押すとページの上に大きく出す (細部を拡大して確かめる用)。外を押すか Esc で閉じる */}
       <Dialog>
