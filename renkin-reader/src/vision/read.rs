@@ -617,6 +617,40 @@ pub const BOX_ROWS: usize = 7;
 /// 黄色い枠の画素の割合がこれ未満なら、枠が見つからないとみなす (何個目かは不明)。ふつうの画面でカーソルの
 /// 枠が乗ったマスは 0.20 以上。手ぶれなどで枠がにじむと 0.10〜0.15 ほどになり、隣のマスと読み違えやすい
 pub const INDEX_MIN_SCORE: f64 = 0.15;
+/// マスの中ほど (中心から ±EMPTY_CELL_HALF px) の明るさのばらつき (標準偏差) がこれ未満なら、護石の無い空のマスと
+/// みなす。charm-pics の写真で、空のマスは 99% が 10.4 以下、護石のあるマスは中央値 57 (護石の色によらない)
+pub const EMPTY_CELL_MAX_STD: f64 = 12.0;
+/// 空のマスかを見る範囲 (マスの中心から ±この px)。マスの間隔 36px の内側で、隣のマスのカーソルの枠にかからない
+const EMPTY_CELL_HALF: i64 = 12;
+/// マスの中ほどにこの割合以上の真っ黒な画素があれば、写真の外にかかっている (空かどうかわからない)
+const OUTSIDE_MAX_RATIO: f64 = 0.02;
+
+/// 中心 (cx, cy) のマスに護石が無いと確かめられるか。マスの中ほどが写真の内側にあり、明るさが平ら (空のマスの模様だけ)
+/// なら true。護石がある、写真の外にかかっている、どちらとも言えないときは false
+fn cell_is_empty(screen: &RgbaView, cx: i64, cy: i64) -> bool {
+    let h = EMPTY_CELL_HALF;
+    let (mut n, mut black, mut sum, mut sq) = (0usize, 0usize, 0.0, 0.0);
+    for y in cy - h..cy + h {
+        for x in cx - h..cx + h {
+            let inside =
+                (0..screen.width() as i64).contains(&x) && (0..screen.height() as i64).contains(&y);
+            let v = if inside {
+                let [r, g, b, _] = screen.pixel(x as usize, y as usize);
+                (f64::from(r) + f64::from(g) + f64::from(b)) / 3.0
+            } else {
+                0.0
+            };
+            n += 1;
+            black += usize::from(v < 8.0);
+            sum += v;
+            sq += v * v;
+        }
+    }
+    let n = n as f64;
+    let mean = sum / n;
+    let std = (sq / n - mean * mean).max(0.0).sqrt();
+    (black as f64) / n < OUTSIDE_MAX_RATIO && std < EMPTY_CELL_MAX_STD
+}
 
 /// カーソルの枠の画素 (黄色)
 fn yellow_mask(screen: &RgbaView) -> Image<bool> {
@@ -669,6 +703,12 @@ fn index_unknown() -> Scored<Option<u8>> {
 /// 1. 見出しの一致度が HEADING_MIN_SCORE 未満なら、見出しが見つからない (位置合わせがずれている) ので不明
 /// 2. マスの位置を見出しのずれの分だけ補正して、縁の黄色い画素の割合が一番大きいマスを選ぶ。割合が
 ///    INDEX_MIN_SCORE 未満なら、カーソルの枠が見つからないので不明
+/// 3. 4 番目のマスなら、5 番目のマスが空だと確かめられたときだけ 4 番目とし、それ以外は不明。1 回の錬金で出るのは
+///    3 個か 4 個なので、ボックスに 5 個以上あると、4 番目は 1 回目の錬金の 4 個目とも 2 回目の 1 個目ともとれる。
+///    5 番目が空ならボックスは 4 個で、1 回の錬金の 4 個 (3 個 + 1 個はありえない)。5 番目が写真の外にかかっていて
+///    確かめられないときも不明にする。何個目かは補助的な情報なので、読み違えるより不明に倒す。
+///    ただし、護石を取り出したあとの空いたマス (穴) があると、ボックスが前から詰まっているという前提が崩れる
+///    (穴は見分けていない)
 fn read_index(screen: &RgbaView, heading: (i64, i64, f64)) -> Scored<Option<u8>> {
     let (hx, hy, hs) = heading;
     if hs < HEADING_MIN_SCORE {
@@ -680,6 +720,14 @@ fn read_index(screen: &RgbaView, heading: (i64, i64, f64)) -> Scored<Option<u8>>
     // 同じ割合なら、左上のマス (Python 版の argmax と同じく番号の若いほう)
     let i = order[0];
     if yel[i] < INDEX_MIN_SCORE {
+        return index_unknown();
+    }
+    // 5 番目のマス (1 段目の左から 5 つ目) の中心
+    let fifth = (
+        (BOX_ORIGIN.0 + 4 * BOX_PITCH) as i64 + hx,
+        BOX_ORIGIN.1 as i64 + hy,
+    );
+    if i == 3 && !cell_is_empty(screen, fifth.0, fifth.1) {
         return index_unknown();
     }
     Scored {
