@@ -60,7 +60,12 @@ async function decode(file: Blob): Promise<ImageData> {
   if (!context) throw new DecodeError('画像を処理できません')
   context.drawImage(bitmap, 0, 0)
   bitmap.close()
-  return context.getImageData(0, 0, canvas.width, canvas.height)
+  const image = context.getImageData(0, 0, canvas.width, canvas.height)
+  // キャンバスの画素 (写真 1 枚分) は GC されるまで残るので、大きさを 0 にしてその場で手放す。写真を続けて読むと、
+  // 前の写真の分が片付く前に次の写真の分ができて、メモリが積み上がる
+  canvas.width = 0
+  canvas.height = 0
+  return image
 }
 
 /** 位置合わせ後の画面 (RGBA) を PNG にする */
