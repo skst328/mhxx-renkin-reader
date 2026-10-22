@@ -136,7 +136,7 @@ pub struct Candidate<T> {
 #[cfg_attr(
     all(target_arch = "wasm32", target_os = "unknown"),
     derive(Tsify),
-    tsify(from_wasm_abi, missing_as_null)
+    tsify(missing_as_null)
 )]
 #[serde(rename_all = "camelCase")]
 pub struct Charm {
@@ -191,13 +191,31 @@ pub(crate) fn union_range(a: Option<PointRange>, b: Option<PointRange>) -> Optio
     }
 }
 
-/// フレームの探索の結果の 1 件: そのフレームで錬金すると、探した護石が何個目に出るか
+/// フレームの探索で探す護石 1 個: 中身と、わかっていれば 1 回の錬金の中で何個目か
+/// (wasm へは配列でまとめて渡すので、serde で JS の値から読む)
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[cfg_attr(
+    all(target_arch = "wasm32", target_os = "unknown"),
+    derive(Tsify),
+    tsify(missing_as_null)
+)]
+pub struct SearchCharm {
+    pub charm: Charm,
+    /// 何個目か (1〜4)。None は指定なし。鑑定ボックスで読んだ位置が 5 以上 (何回分もの錬金の護石が並んでいる) なら、
+    /// 1 回の錬金の中での位置ではないので、呼ぶ側で None にして渡す (1〜4 以外はエラー)
+    pub index: Option<u8>,
+}
+
+/// フレームの探索の結果の 1 件: そのフレームで錬金すると、探した護石が全部 (それぞれ別の位置に) 出る
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[cfg_attr(all(target_arch = "wasm32", target_os = "unknown"), derive(Tsify))]
-pub struct FrameCandidate {
+pub struct FrameMatch {
     pub frame: u32,
-    /// 何個目か (1 から、小さい順)。同じ中身の護石が 1 回の錬金で 2 か所に出ることもあるので一覧
-    pub indexes: Vec<u8>,
+    /// 探した護石ごと (渡した順) の、何個目に出るか (1 から、小さい順)。同じ中身の護石が 1 回の錬金で 2 か所に
+    /// 出ることもあるので一覧
+    pub indexes: Vec<Vec<u8>>,
+    /// 護石ごとの位置の選び方の 1 つ (全部が別の位置になるもの。渡した順)
+    pub positions: Vec<u8>,
 }
 
 /// 入力の誤り (呼び出し側のバグ)。読み取りの失敗は ReadResult::Rejected で返し、これは使わない
@@ -207,6 +225,8 @@ pub enum InputError {
     PixelLength { expected: usize, actual: usize },
     /// 探索の範囲が start > end
     FrameRange { start: u32, end: u32 },
+    /// 探す護石の何個目が 1〜4 でない (1 回の錬金の中での位置ではない)
+    Index { index: u8 },
 }
 
 impl std::fmt::Display for InputError {
@@ -220,6 +240,9 @@ impl std::fmt::Display for InputError {
             }
             Self::FrameRange { start, end } => {
                 write!(f, "探索の範囲が逆 (start {start} > end {end})")
+            }
+            Self::Index { index } => {
+                write!(f, "探す護石の何個目が 1〜4 でない ({index})")
             }
         }
     }

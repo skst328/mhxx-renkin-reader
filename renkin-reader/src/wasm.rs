@@ -2,7 +2,7 @@
 
 use wasm_bindgen::prelude::*;
 
-use crate::types::{Charm, ReadResult};
+use crate::types::{ReadResult, SearchCharm};
 
 #[wasm_bindgen(js_name = Reader)]
 pub struct WasmReader(crate::Reader);
@@ -39,15 +39,16 @@ pub fn skills() -> Result<JsValue, JsError> {
     Ok(serde_wasm_bindgen::to_value(&crate::skill_info())?)
 }
 
-/// [start, end) のフレームのうち、charm が (index があればその何個目に) 出るものを、何個目に出るかと一緒に返す。
-/// index が 5 以上 (鑑定ボックスに何回分もの錬金の護石が並んでいるとき) は、何個目の指定なしとして探す
-#[wasm_bindgen(js_name = searchFrames, unchecked_return_type = "FrameCandidate[]")]
+/// [start, end) のフレームのうち、charms が全部 (index があればその何個目に、全部が別の位置に) 出るものを、
+/// 護石ごとの何個目と一緒に返す。index は 1 回の錬金の中での位置 (1〜4) か null で、それ以外はエラー
+/// (鑑定ボックスで読んだ位置が 5 以上なら、呼ぶ側で null にする)
+#[wasm_bindgen(js_name = searchFrames, unchecked_return_type = "FrameMatch[]")]
 pub fn search_frames(
-    charm: Charm,
-    index: Option<u8>,
+    #[wasm_bindgen(unchecked_param_type = "SearchCharm[]")] charms: JsValue,
     start: u32,
     end: u32,
 ) -> Result<JsValue, JsError> {
-    let found = crate::search_frames(&charm, index, start, end)?;
+    let charms: Vec<SearchCharm> = serde_wasm_bindgen::from_value(charms)?;
+    let found = crate::search_frames(&charms, start, end)?;
     Ok(serde_wasm_bindgen::to_value(&found)?)
 }

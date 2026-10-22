@@ -41,7 +41,7 @@ MHXX の錬金結果の鑑定画面を写真から読む Rust のクレート。
 
 | 何を確かめるか / 測るか | 動かし方 |
 |---|---|
-| charm-pics の写真 288 枚を写真から最後まで読んで、期待どおり (`tests/charm_pics.rs`) | `cargo test --release --test charm_pics -- --ignored --nocapture` (3 スレッドで 100 秒ほど) |
+| charm-pics の写真 288 枚を写真から最後まで読んで、期待どおり (`tests/charm_pics.rs`) | `cargo test --release --test charm_pics -- --ignored --nocapture` (数分程度) |
 | 劣化 (縮小・ピンボケ・手ぶれ・ノイズ・JPEG・ガンマ・反射) を段階的に加えて読み、自信ありの読み間違い (すり抜け) が無いか (`tests/degradation.rs`) | `cargo test --release --test degradation -- --ignored --nocapture` (時間がかかる。絞り方などはファイルの先頭のコメント) |
 | 段階ごとの時間 (ネイティブ、`tests/profile.rs`) | `cargo test --release --test profile -- --ignored --nocapture` |
 | 段階ごとの時間 (wasm。JS との境界も通る) | `wasm-pack build --release --target nodejs --out-dir <pkg>` してから `node ../tools/bench.mjs <pkg> [--json 結果.json]`。2 つの結果は `node ../tools/bench.mjs --compare 前.json 後.json` で比べる (読み取り結果が同じかと時間) |

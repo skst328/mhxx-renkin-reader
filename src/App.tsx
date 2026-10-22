@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   AlertCircleIcon,
   CameraIcon,
+  CircleCheckIcon,
   ImageIcon,
   LoaderCircleIcon,
   XIcon,
@@ -9,6 +10,7 @@ import {
   RotateCcwIcon,
   SearchIcon,
   ShieldCheckIcon,
+  TriangleAlertIcon,
 } from 'lucide-react'
 
 import { CharmForm } from '@/components/charm-form'
@@ -24,7 +26,6 @@ import { isComplete, type Draft, type FieldName, type Unsure } from '@/lib/draft
 import { detectCapabilities } from '@/lib/capabilities'
 import { useWindowFileDrop } from '@/lib/drop'
 import { parseFrame } from '@/lib/frame'
-import { intersectCandidates } from '@/lib/multi'
 import { formatBytes, hasFinePointer } from '@/lib/pointer'
 import { loadSkills, readPhoto, searchFrames } from '@/lib/reader'
 import { possible, skillName } from '@/lib/skills'
@@ -274,7 +275,7 @@ export default function App() {
   const [progress, setProgress] = useState(0)
   const abort = useRef<AbortController | null>(null)
 
-  /** 中身の入ったタブの護石ごとに探し、2 個以上なら全部が (それぞれ別の位置に) 出るフレームだけを残す */
+  /** 中身の入ったタブの護石を全部まとめて探す (2 個以上なら、全部が (それぞれ別の位置に) 出るフレームだけ) */
   const search = async () => {
     if (!canSearch) return
     setSearching(true)
@@ -282,32 +283,32 @@ export default function App() {
     const controller = new AbortController()
     abort.current = controller
     try {
-      const lists = []
-      for (const [k, { t }] of filled.entries()) {
-        const d = t.draft
-        const charm = {
+      const searched = filled.map(({ t: { draft: d } }) => ({
+        charm: {
           skill1: d.skill1!,
           pts1: d.pts1!,
           skill2: d.skill2,
           pts2: d.skill2 === null ? null : d.pts2,
           slots: d.slots!,
-        }
-        lists.push(
-          await searchFrames(charm, d.index, start!, end!, {
-            onProgress: (done, total) => setProgress((k + done / total) / filled.length),
-            signal: controller.signal,
-          }),
-        )
-      }
+        },
+        index: d.index,
+      }))
+      const matches = await searchFrames(searched, start!, end!, {
+        onProgress: (done, total) => setProgress(done / total),
+        signal: controller.signal,
+      })
       const charms = filled.map(({ t, no }) => describeCharm(skills!, no, t.draft))
       if (filled.length === 1) {
         // ボックス内の位置がわかっていれば全部同じなので、札は出さない
         const known = filled[0].t.draft.index !== null
-        const items = lists[0].map((c) => ({ frame: c.frame, badges: known ? [] : c.indexes.map((i) => `${i} 番目`) }))
+        const items = matches.map((c) => ({
+          frame: c.frame,
+          badges: known ? [] : c.indexes[0].map((i) => `${i} 番目`),
+        }))
         setFound({ items, charms, multi: false, count: 1 })
       } else {
         // 位置を入れた護石の札は上の表と同じなので、位置が不明だった護石の札だけ出す
-        const items = intersectCandidates(lists).map((c) => ({
+        const items = matches.map((c) => ({
           frame: c.frame,
           badges: c.positions.flatMap((p, k) =>
             filled[k].t.draft.index === null ? [`護石 ${filled[k].no}: ${p} 番目`] : [],
@@ -429,13 +430,22 @@ export default function App() {
                       )}
                     >
                       <span className="whitespace-nowrap">護石 {i + 1}</span>
-                      {/* 中身の要約は出さず、読み取り中と撮り直しのときだけ印を付ける */}
+                      {/* 中身の要約は出さず、読み取りの状態だけを印で示す (読み取り中・撮り直し・確かめる欄あり・読み取り済み。
+                          写真なしで手入力したタブには付けない) */}
                       {t.stage === 'reading' && (
                         <LoaderCircleIcon aria-label="読み取り中" className="size-3.5 shrink-0 animate-spin text-primary" />
                       )}
                       {(t.stage === 'rejected' || t.error) && (
                         <AlertCircleIcon aria-label="撮り直し" className="size-3.5 shrink-0 text-destructive" />
                       )}
+                      {/* 読み取れたタブ: 自信のない欄が残っていれば警告、なければ成功 (欄を確かめて直すと成功になる) */}
+                      {t.stage === 'edit' &&
+                        !t.error &&
+                        (Object.keys(t.unsure).length > 0 ? (
+                          <TriangleAlertIcon aria-label="確かめる欄あり" className="size-3.5 shrink-0 text-warning" />
+                        ) : (
+                          <CircleCheckIcon aria-label="読み取り済み" className="size-3.5 shrink-0 text-success" />
+                        ))}
                     </button>
                     {tabs.length > 1 && (
                       <Button

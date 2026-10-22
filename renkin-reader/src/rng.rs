@@ -13,7 +13,9 @@ mod xorshift;
 use charm::{Generated, Table, WEATHERED, WORN};
 use xorshift::{SEED, ascend, descend, jump};
 
-use crate::types::{Charm, FrameCandidate, InputError, PointRange, SkillInfo, union_range};
+use crate::types::{
+    Charm, FrameMatch, InputError, PointRange, SearchCharm, SkillInfo, union_range,
+};
 
 /// 1 回の錬金で出る護石の種類の数 (投入は最高ランク): 風化 (乱数 % 1 + 2 個)、古びた (乱数 % 2 + 1 個)。
 /// mhxx-rng の juju_colors の rank 4 の値 (幅, 最小)
@@ -42,20 +44,28 @@ fn counts(seed: u32) -> (usize, usize) {
     (n1 as usize, n2 as usize)
 }
 
-/// 錬金で出る種類の並び (風化が先、古びたが後)
-#[cfg(test)]
-fn kinds(seed: u32) -> impl Iterator<Item = &'static Table> {
-    let (n1, n2) = counts(seed);
-    std::iter::repeat_n(&WEATHERED, n1).chain(std::iter::repeat_n(&WORN, n2))
-}
-
 /// フレーム f の乱数の状態 (f = -1 は初期値の 1 つ前)
 fn state(f: i64) -> [u32; 4] {
     if f < 0 { descend(SEED) } else { jump(f as u64) }
 }
 
-/// frame で錬金したときに出る護石 (鑑定ボックスの並び順) と、その種類 (0 = 風化した護石、1 = 古びた護石)。
-/// 今はテストで Python 版と比べるのに使う
+/// 錬金で出る護石 (鑑定ボックスの並び順) と、その種類 (0 = 風化した護石、1 = 古びた護石)。
+/// v(d) は錬金したフレームの d - 1 個先の乱数 (v(0) が 1 つ前、v(1) が錬金したフレーム)。d は MAX_OFFSET + 7 まで使う
+fn meld(v: impl Fn(usize) -> u32) -> Vec<(u8, Generated)> {
+    let (n1, n2) = counts(v(0));
+    let tables = [&WEATHERED, &WORN];
+    let mut pos = 1;
+    (0..n1 + n2)
+        .map(|j| {
+            let k = usize::from(j >= n1);
+            let c = tables[k].make(&std::array::from_fn(|d| v(pos + d)));
+            pos += tables[k].stride(v(pos + 2));
+            (k as u8, c)
+        })
+        .collect()
+}
+
+/// frame で錬金したときに出る護石 (jump で frame へ飛んで作る)。テストで、Python 版や総当たりと比べるのに使う
 #[cfg(test)]
 fn melding(frame: u32) -> Vec<(u8, Generated)> {
     // v[k] はフレーム frame - 1 + k の乱数
@@ -67,14 +77,7 @@ fn melding(frame: u32) -> Vec<(u8, Generated)> {
             w
         })
         .collect();
-    let mut pos = 1;
-    kinds(v[0])
-        .map(|t| {
-            let c = t.make(v[pos..pos + 7].try_into().unwrap());
-            pos += t.stride(v[pos + 2]);
-            (u8::from(!std::ptr::eq(t, &WEATHERED)), c)
-        })
-        .collect()
+    meld(|d| v[d])
 }
 
 /// 作った護石が、鑑定画面で読んだ中身と同じか
@@ -160,35 +163,89 @@ pub fn skill_info() -> Vec<SkillInfo> {
         .collect()
 }
 
-/// [start, end) のフレームのうち、charm が (index があればその何個目に) 出るものを、何個目に出るかと一緒に返す
-/// (フレームの小さい順)。
+// 割る数を定数にして、割り算を掛け算に置き換えられるようにする
+const LEN1: [u32; 2] = [WEATHERED.skill1.len() as u32, WORN.skill1.len() as u32];
+const LEN2: [u32; 2] = [WEATHERED.skill2.len() as u32, WORN.skill2.len() as u32];
+const NO_SKILL2: [u32; 2] = [WEATHERED.no_skill2, WORN.no_skill2];
+
+/// 護石が乱数の列のある位置から作られる見込み (錬金の表からの大まかな値。スロットは見ない)。
+/// 小さいほど、乱数の列を流したときに見つかる位置が少ない
+fn density(quick: &[Option<Quick>; 2]) -> f64 {
+    (0..2)
+        .filter_map(|k| {
+            let q = quick[k].as_ref()?;
+            let skill2 = q.loc2.map_or(1.0, |_| {
+                f64::from(100 - NO_SKILL2[k]) / 100.0 / f64::from(LEN2[k])
+            });
+            Some(skill2 / f64::from(LEN1[k]) / f64::from(q.width1))
+        })
+        .sum()
+}
+
+/// 護石ごとの位置の候補 (options[k] は k 個目の護石が出る何個目) から、全部が別の位置になる選び方を 1 つ返す。
+/// 護石も位置も 4 つまでなので、全部試しても軽い
+fn distinct_positions(options: &[Vec<u8>]) -> Option<Vec<u8>> {
+    fn pick(options: &[Vec<u8>], chosen: &mut Vec<u8>) -> bool {
+        let Some((first, rest)) = options.split_first() else {
+            return true;
+        };
+        for &p in first {
+            if chosen.contains(&p) {
+                continue;
+            }
+            chosen.push(p);
+            if pick(rest, chosen) {
+                return true;
+            }
+            chosen.pop();
+        }
+        false
+    }
+    let mut chosen = Vec::new();
+    pick(options, &mut chosen).then_some(chosen)
+}
+
+/// [start, end) のフレームのうち、charms が全部 (index があればその何個目に、全部が別の位置に) 出るものを、
+/// 護石ごとの何個目と一緒に返す (フレームの小さい順)。charms が空なら空。
 ///
 /// index は 1 回の錬金の中で何個目か (1〜4)。錬金を予約してまとめて行うと、鑑定ボックスには何回分もの護石が
 /// 続けて並ぶので、画面で読める何個目は 5 以上になりうる。そのときは 1 回の錬金の中での位置がわからないので、
-/// 何個目の指定なしとして探す (候補は増えるが、取りこぼさない)。0 も指定なしとして扱う
+/// 呼ぶ側で指定なし (None) にして渡す (候補は増えるが、取りこぼさない)。1〜4 以外の index はエラー
 ///
 /// フレームごとに護石の並びをたどると重いので、逆からたどる: 乱数の列を 1 回だけ流して「この位置の乱数から作る
-/// 護石が charm になる」位置 p を探し (第 1 スキルが合うだけで 1/60 程度なので、まれ)、見つかったら p を通りうる
-/// 錬金のフレーム (p の 0〜18 個手前) を 1 つずつ確かめる
+/// 護石が手がかりの護石になる」位置 p を探し (第 1 スキルが合うだけで 1/60 程度なので、まれ)、見つかったら p を
+/// 通りうる錬金のフレーム (p の 0〜18 個手前) を挙げる。挙げたフレームは、錬金の乱数がそろったところで護石を
+/// 作り直し、全部の護石が出るかを確かめる。手がかりには、いちばん出にくそうな護石を使う
 pub fn search_frames(
-    charm: &Charm,
-    index: Option<u8>,
+    charms: &[SearchCharm],
     start: u32,
     end: u32,
-) -> Result<Vec<FrameCandidate>, InputError> {
+) -> Result<Vec<FrameMatch>, InputError> {
     if start > end {
         return Err(InputError::FrameRange { start, end });
     }
-    let index = index.filter(|n| (1..=MAX_CHARMS).contains(n));
+    if let Some(index) = charms
+        .iter()
+        .filter_map(|c| c.index)
+        .find(|n| !(1..=MAX_CHARMS).contains(n))
+    {
+        return Err(InputError::Index { index });
+    }
+    let wants: Vec<(&Charm, Option<u8>)> = charms.iter().map(|c| (&c.charm, c.index)).collect();
     let tables = [&WEATHERED, &WORN];
-    let quick = tables.map(|t| Quick::new(t, charm));
-    if quick.iter().all(Option::is_none) || start == end {
+    let quicks: Vec<[Option<Quick>; 2]> = wants
+        .iter()
+        .map(|(c, _)| tables.map(|t| Quick::new(t, c)))
+        .collect();
+    // どれか 1 つでもマカ錬金で出ない護石なら、どのフレームにも出ない
+    if wants.is_empty() || quicks.iter().any(|q| q.iter().all(Option::is_none)) || start == end {
         return Ok(Vec::new());
     }
-    // 割る数を定数にして、割り算を掛け算に置き換えられるようにする
-    const LEN1: [u32; 2] = [WEATHERED.skill1.len() as u32, WORN.skill1.len() as u32];
-    const LEN2: [u32; 2] = [WEATHERED.skill2.len() as u32, WORN.skill2.len() as u32];
-    const NO_SKILL2: [u32; 2] = [WEATHERED.no_skill2, WORN.no_skill2];
+    let lead = (0..wants.len())
+        .min_by(|&a, &b| density(&quicks[a]).total_cmp(&density(&quicks[b])))
+        .unwrap();
+    let (charm, index) = wants[lead];
+    let quick = &quicks[lead];
     let loc1 = quick
         .each_ref()
         .map(|q| q.as_ref().map_or(u32::MAX, |q| q.loc1));
@@ -198,59 +255,74 @@ pub fn search_frames(
     let last_p = n + MAX_OFFSET;
     let mut v = [0u32; WINDOW];
     let mut s = state(start as i64 - 1);
-    let mut out = Vec::new();
+    // 手がかりの護石が出うる錬金のフレーム (u)。作り直すのに要る乱数 (u - 1 .. u + MAX_OFFSET + 6) がそろったら
+    // 確かめる。p から挙げるフレームは p - 18 以上なので、確かめ終えたフレームより前のものが後から来ることはない
+    let mut pending = std::collections::BTreeSet::new();
+    let mut found = Vec::new();
     for q in 0..=last_p + 6 {
         v[q % WINDOW] = s[3];
         s = ascend(s);
-        // 乱数が 7 個そろった位置 p から作る護石を見る
-        let Some(p) = q.checked_sub(6).filter(|&p| p >= 1) else {
-            continue;
-        };
         let at = |u: usize| v[u % WINDOW];
-        for k in 0..2 {
-            let Some(qk) = &quick[k] else { continue };
-            if at(p) % LEN1[k] != loc1[k]
-                || at(p + 1) % qk.width1 != qk.rem1
-                || qk
-                    .loc2
-                    .is_some_and(|l| at(p + 2) % 100 < NO_SKILL2[k] || at(p + 3) % LEN2[k] != l)
-            {
-                continue;
-            }
-            let r: [u32; 7] = std::array::from_fn(|d| at(p + d));
-            if !matches(&tables[k].make(&r), charm) {
-                continue;
-            }
-            // p を k の種類の護石として通る錬金のフレームを探す
-            for f in p.saturating_sub(MAX_OFFSET).max(1)..=p.min(n) {
-                let (n1, n2) = counts(at(f - 1));
-                let mut pos = f;
-                for j in 0..n1 + n2 {
-                    if pos >= p {
-                        if pos == p
-                            && usize::from(j >= n1) == k
-                            && index.is_none_or(|i| j + 1 == i as usize)
-                        {
-                            out.push((start + (f - 1) as u32, j as u8 + 1));
+        // 乱数が 7 個そろった位置 p から作る護石を見る
+        if let Some(p) = q.checked_sub(6).filter(|&p| p >= 1) {
+            for k in 0..2 {
+                let Some(qk) = &quick[k] else { continue };
+                if at(p) % LEN1[k] != loc1[k]
+                    || at(p + 1) % qk.width1 != qk.rem1
+                    || qk
+                        .loc2
+                        .is_some_and(|l| at(p + 2) % 100 < NO_SKILL2[k] || at(p + 3) % LEN2[k] != l)
+                {
+                    continue;
+                }
+                let r: [u32; 7] = std::array::from_fn(|d| at(p + d));
+                if !matches(&tables[k].make(&r), charm) {
+                    continue;
+                }
+                // p を k の種類の護石として通る錬金のフレームを探す
+                for f in p.saturating_sub(MAX_OFFSET).max(1)..=p.min(n) {
+                    let (n1, n2) = counts(at(f - 1));
+                    let mut pos = f;
+                    for j in 0..n1 + n2 {
+                        if pos >= p {
+                            if pos == p
+                                && usize::from(j >= n1) == k
+                                && index.is_none_or(|i| j + 1 == i as usize)
+                            {
+                                pending.insert(f);
+                            }
+                            break;
                         }
-                        break;
+                        pos += tables[usize::from(j >= n1)].stride(at(pos + 2));
                     }
-                    pos += tables[usize::from(j >= n1)].stride(at(pos + 2));
                 }
             }
         }
-    }
-    // (フレーム, 何個目) を、フレームごとにまとめる
-    out.sort_unstable();
-    out.dedup();
-    let mut found: Vec<FrameCandidate> = Vec::new();
-    for (frame, j) in out {
-        match found.last_mut() {
-            Some(c) if c.frame == frame => c.indexes.push(j),
-            _ => found.push(FrameCandidate {
-                frame,
-                indexes: vec![j],
-            }),
+        while let Some(&u) = pending.first() {
+            if u + MAX_OFFSET + 6 > q {
+                break;
+            }
+            pending.pop_first();
+            let made = meld(|d| at(u - 1 + d));
+            // 護石ごとに、作った護石のうち何個目に出るか
+            let indexes: Vec<Vec<u8>> = wants
+                .iter()
+                .map(|(c, index)| {
+                    (0..made.len())
+                        .filter(|&j| {
+                            index.is_none_or(|i| j + 1 == i as usize) && matches(&made[j].1, c)
+                        })
+                        .map(|j| j as u8 + 1)
+                        .collect()
+                })
+                .collect();
+            if let Some(positions) = distinct_positions(&indexes) {
+                found.push(FrameMatch {
+                    frame: start + (u - 1) as u32,
+                    indexes,
+                    positions,
+                });
+            }
         }
     }
     Ok(found)
@@ -270,6 +342,36 @@ mod tests {
             skill2: (n(2) >= 0).then(|| n(2) as u16),
             pts2: (n(2) >= 0).then(|| n(3) as i8),
             slots: n(4) as u8,
+        }
+    }
+
+    /// 護石 1 個で探した結果 (フレームと、何個目の一覧)
+    type Found = Vec<(u32, Vec<u8>)>;
+
+    /// 護石 1 個で探す
+    fn search_one(c: &Charm, index: Option<u8>, start: u32, end: u32) -> Found {
+        let charms = [SearchCharm {
+            charm: c.clone(),
+            index,
+        }];
+        search_frames(&charms, start, end)
+            .unwrap()
+            .into_iter()
+            .map(|m| {
+                assert_eq!(m.positions, [m.indexes[0][0]], "{m:?}");
+                (m.frame, m.indexes.into_iter().next().unwrap())
+            })
+            .collect()
+    }
+
+    /// 画面に出る中身 (第 1 スキルと同じ第 2 スキルは出ない)
+    fn shown(c: &Generated) -> Charm {
+        Charm {
+            skill1: c.skill1,
+            pts1: c.pts1,
+            skill2: c.skill2.filter(|_| c.shows_skill2()),
+            pts2: c.shows_skill2().then_some(c.pts2),
+            slots: c.slots,
         }
     }
 
@@ -351,21 +453,21 @@ mod tests {
                 case["end"].as_u64().unwrap() as u32,
             );
             // 正解は [[フレーム, [何個目, ...]], ...]
-            let want: Vec<FrameCandidate> = case["found"]
+            let want: Found = case["found"]
                 .as_array()
                 .unwrap()
                 .iter()
-                .map(|v| FrameCandidate {
-                    frame: v[0].as_u64().unwrap() as u32,
-                    indexes: v[1]
+                .map(|v| {
+                    let indexes = v[1]
                         .as_array()
                         .unwrap()
                         .iter()
                         .map(|i| i.as_u64().unwrap() as u8)
-                        .collect(),
+                        .collect();
+                    (v[0].as_u64().unwrap() as u32, indexes)
                 })
                 .collect();
-            let got = search_frames(&c, index, start, end).unwrap();
+            let got = search_one(&c, index, start, end);
             assert_eq!(got, want, "{c:?} 何個目 {index:?}");
         }
     }
@@ -375,19 +477,12 @@ mod tests {
     fn search_finds_generated_charms() {
         for frame in [0, 1, 5, 1000, 123_456] {
             for (j, (_, c)) in melding(frame).iter().enumerate() {
-                let shown = c.shows_skill2();
-                let want = Charm {
-                    skill1: c.skill1,
-                    pts1: c.pts1,
-                    skill2: c.skill2.filter(|_| shown),
-                    pts2: shown.then_some(c.pts2),
-                    slots: c.slots,
-                };
+                let want = shown(c);
                 let lo = frame.saturating_sub(3);
-                let got = search_frames(&want, Some(j as u8 + 1), lo, frame + 3).unwrap();
+                let got = search_one(&want, Some(j as u8 + 1), lo, frame + 3);
                 assert!(
                     got.iter()
-                        .any(|g| g.frame == frame && g.indexes == [j as u8 + 1]),
+                        .any(|(g, indexes)| *g == frame && indexes == &[j as u8 + 1]),
                     "フレーム {frame} の {} 個目 {want:?}: {got:?}",
                     j + 1
                 );
@@ -400,13 +495,6 @@ mod tests {
     fn search_matches_brute_force() {
         let (start, end) = (0u32, 30_000u32);
         let all: Vec<Vec<(u8, Generated)>> = (start..end + 1).map(melding).collect();
-        let shown = |c: &Generated| Charm {
-            skill1: c.skill1,
-            pts1: c.pts1,
-            skill2: c.skill2.filter(|_| c.shows_skill2()),
-            pts2: c.shows_skill2().then_some(c.pts2),
-            slots: c.slots,
-        };
         // よく出る護石 (第 2 スキルなし) と、まれな護石を、いくつかのフレームから選ぶ
         let picks = [0usize, 1, 17, 4321, 29_999];
         for &f in &picks {
@@ -414,7 +502,7 @@ mod tests {
                 let want = shown(c);
                 for index in [None, Some(1), Some(2), Some(3), Some(4)] {
                     // フレームごとに、want が出る何個目を全部集める
-                    let brute: Vec<FrameCandidate> = (start..end)
+                    let brute: Found = (start..end)
                         .filter_map(|g| {
                             let indexes: Vec<u8> = all[g as usize]
                                 .iter()
@@ -424,22 +512,22 @@ mod tests {
                                 })
                                 .map(|(j, _)| j as u8 + 1)
                                 .collect();
-                            (!indexes.is_empty()).then_some(FrameCandidate { frame: g, indexes })
+                            (!indexes.is_empty()).then_some((g, indexes))
                         })
                         .collect();
                     assert_eq!(
-                        search_frames(&want, index, start, end).unwrap(),
+                        search_one(&want, index, start, end),
                         brute,
                         "{want:?} 何個目 {index:?}"
                     );
                     let (a, b) = (start + 7, end - 13);
-                    let sub: Vec<FrameCandidate> = brute
+                    let sub: Found = brute
                         .iter()
-                        .filter(|g| (a..b).contains(&g.frame))
+                        .filter(|(g, _)| (a..b).contains(g))
                         .cloned()
                         .collect();
                     assert_eq!(
-                        search_frames(&want, index, a, b).unwrap(),
+                        search_one(&want, index, a, b),
                         sub,
                         "{want:?} 何個目 {index:?} 範囲 {a}..{b}"
                     );
@@ -449,8 +537,7 @@ mod tests {
     }
 
     /// mhxx-rng の「有名なお守り」(docs/charms.md) を 0〜10 億フレームで探す。答えが Python 版 (frames.py) と同じで、
-    /// 一覧のフレーム (護石が始まる位置) の 0〜18 個手前にある答えの数が、一覧の「当たりフレーム」と同じ。
-    /// 6 件で、ネイティブで 20 秒ほど
+    /// 一覧のフレーム (護石が始まる位置) の 0〜18 個手前にある答えの数が、一覧の「当たりフレーム」と同じ (6 件)
     #[test]
     fn famous_charms_in_a_billion_frames() {
         let f = json_fixture("rng/famous.json");
@@ -464,10 +551,9 @@ mod tests {
                 .collect();
             let t = std::time::Instant::now();
             // 正解はフレームだけ (何個目は Python 版との比較と総当たりのテストで見ている)
-            let got: Vec<u32> = search_frames(&charm(&case["charm"]), None, 0, 1_000_000_000)
-                .unwrap()
+            let got: Vec<u32> = search_one(&charm(&case["charm"]), None, 0, 1_000_000_000)
                 .iter()
-                .map(|c| c.frame)
+                .map(|(g, _)| *g)
                 .collect();
             println!(
                 "{name}: {} 件、{:.1} 秒",
@@ -502,9 +588,10 @@ mod tests {
         assert_eq!(ids, list);
     }
 
-    /// 何個目が 5 以上 (鑑定ボックスに何回分もの錬金の護石が並んでいるとき) と 0 は、指定なしと同じ
+    /// 何個目が 1〜4 でない (0 や、鑑定ボックスで読んだ 5 以上の位置をそのまま渡した) ならエラー。
+    /// 複数の護石のうち 1 個だけ外れていてもエラー
     #[test]
-    fn index_beyond_one_melding_means_unknown() {
+    fn index_outside_one_melding_is_an_error() {
         let c = Charm {
             skill1: 106,
             pts1: 4,
@@ -512,12 +599,25 @@ mod tests {
             pts2: None,
             slots: 1,
         }; // 跳躍4 S1
-        let none = search_frames(&c, None, 0, 200_000).unwrap();
-        assert!(!none.is_empty());
         for index in [0, 5, 12, 40] {
+            let charms = [
+                SearchCharm {
+                    charm: c.clone(),
+                    index: Some(1),
+                },
+                SearchCharm {
+                    charm: c.clone(),
+                    index: Some(index),
+                },
+            ];
             assert_eq!(
-                search_frames(&c, Some(index), 0, 200_000).unwrap(),
-                none,
+                search_frames(&charms, 0, 200_000),
+                Err(InputError::Index { index }),
+                "何個目 {index}"
+            );
+            assert_eq!(
+                search_frames(&charms[1..], 0, 200_000),
+                Err(InputError::Index { index }),
                 "何個目 {index}"
             );
         }
@@ -558,10 +658,109 @@ mod tests {
             pts2: None,
             slots: 0,
         };
+        let charms = [SearchCharm {
+            charm: c,
+            index: None,
+        }];
         assert_eq!(
-            search_frames(&c, None, 10, 5),
+            search_frames(&charms, 10, 5),
             Err(InputError::FrameRange { start: 10, end: 5 })
         );
-        assert_eq!(search_frames(&c, None, 5, 5), Ok(Vec::new()));
+        assert_eq!(search_frames(&charms, 5, 5), Ok(Vec::new()));
+        assert_eq!(search_frames(&[], 0, 100), Ok(Vec::new()));
+    }
+
+    /// 錬金で出た護石 made のうち、want が何個目に出るか (index があればその位置だけ)
+    fn places(made: &[(u8, Generated)], want: &SearchCharm) -> Vec<u8> {
+        (0..made.len())
+            .filter(|&j| {
+                want.index.is_none_or(|i| j + 1 == i as usize) && shown(&made[j].1) == want.charm
+            })
+            .map(|j| j as u8 + 1)
+            .collect()
+    }
+
+    /// 複数の護石で探した 1 件が、そのフレームの錬金を作り直したものと合う: 何個目が護石ごとに合い、
+    /// 位置の選び方がそれぞれの護石の出る位置で、全部が別
+    fn assert_match_is_consistent(m: &FrameMatch, charms: &[SearchCharm]) {
+        let made = melding(m.frame);
+        let want: Vec<Vec<u8>> = charms.iter().map(|c| places(&made, c)).collect();
+        assert_eq!(m.indexes, want, "{m:?}");
+        assert!(
+            m.positions
+                .iter()
+                .zip(&m.indexes)
+                .all(|(p, ix)| ix.contains(p)),
+            "{m:?}"
+        );
+        assert!(
+            (1..m.positions.len()).all(|i| !m.positions[..i].contains(&m.positions[i])),
+            "{m:?}"
+        );
+    }
+
+    /// 複数の護石で探したものが、1 フレームずつ素直に護石を作って、全部が別の位置に出るか確かめたものと同じ
+    /// (同じ錬金の護石の組・ほかの錬金の護石との組・同じ中身の護石を 2 個・何個目の指定あり・なしを含む)。
+    /// 範囲は 0 からと、10 億の手前 (大きなフレームでも、作り直す錬金のフレームの数え方がずれない)
+    #[test]
+    fn multi_search_matches_brute_force() {
+        for start in [0u32, 999_970_000] {
+            let end = start + 30_000;
+            let all: Vec<Vec<(u8, Generated)>> = (start..end).map(melding).collect();
+            // f は start からの何フレーム目か
+            let pick = |f: usize, j: usize, index: bool| SearchCharm {
+                charm: shown(&all[f][j].1),
+                index: index.then_some(j as u8 + 1),
+            };
+            let cases: Vec<Vec<SearchCharm>> = vec![
+                vec![pick(17, 0, true), pick(17, 1, true)],
+                vec![pick(17, 0, false), pick(17, 1, false), pick(17, 2, false)],
+                vec![pick(4321, 1, false), pick(4321, 2, true)],
+                vec![pick(29_000, 0, false), pick(123, 1, false)],
+                vec![pick(500, 0, false), pick(500, 0, false)],
+                (0..all[2000].len()).map(|j| pick(2000, j, false)).collect(),
+            ];
+            for charms in &cases {
+                let brute: Vec<(u32, Vec<Vec<u8>>)> = (start..end)
+                    .filter_map(|g| {
+                        let made = &all[(g - start) as usize];
+                        let indexes: Vec<Vec<u8>> =
+                            charms.iter().map(|c| places(made, c)).collect();
+                        distinct_positions(&indexes).map(|_| (g, indexes))
+                    })
+                    .collect();
+                let got = search_frames(charms, start, end).unwrap();
+                for m in &got {
+                    assert_match_is_consistent(m, charms);
+                }
+                let got: Vec<(u32, Vec<Vec<u8>>)> =
+                    got.into_iter().map(|m| (m.frame, m.indexes)).collect();
+                assert_eq!(got, brute, "{start}..{end} {charms:?}");
+            }
+        }
+    }
+
+    /// 0〜10 億フレームを通しで、複数の護石で探す。10 億の手前で錬金した護石を全部 (何個目の指定あり) 渡すと、
+    /// そのフレームが見つかり、見つかったどのフレームも錬金を作り直したものと合う。
+    /// 範囲全体を流すのは護石の数によらず 1 回 (10 億フレームの単独のテストの 1 件分)
+    #[test]
+    fn multi_charms_in_a_billion_frames() {
+        let frame = 999_999_000;
+        let charms: Vec<SearchCharm> = melding(frame)
+            .iter()
+            .enumerate()
+            .map(|(j, (_, c))| SearchCharm {
+                charm: shown(c),
+                index: Some(j as u8 + 1),
+            })
+            .collect();
+        let got = search_frames(&charms, 0, 1_000_000_000).unwrap();
+        let hit = got.iter().find(|m| m.frame == frame);
+        assert!(hit.is_some(), "フレーム {frame} が見つからない: {got:?}");
+        let order: Vec<u8> = (1..=charms.len() as u8).collect();
+        assert_eq!(hit.unwrap().positions, order);
+        for m in &got {
+            assert_match_is_consistent(m, &charms);
+        }
     }
 }

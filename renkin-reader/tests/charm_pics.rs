@@ -5,7 +5,7 @@
 //! CHARM_PICS (無ければ、このリポジトリの隣の charm-pics)。無ければ何もせずに通る。HEIC は Rust で開けないので、
 //! tools/export_golden.py が tests/golden/photos/ に書き出した JPEG を使う。
 //!
-//! wasm の中でも流せる (スレッドは使えないので 1 本で読む。数分かかる):
+//! wasm の中でも流せる (スレッドは使えないので 1 本で読む):
 //! `cargo test --release --target wasm32-wasip1 --test charm_pics -- --ignored --nocapture`
 //!
 //! 調べるとき用の環境変数は tests/support/e2e.rs のほかに、RENKIN_DECODED (OpenCV で開いた画素

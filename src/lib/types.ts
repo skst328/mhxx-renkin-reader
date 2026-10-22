@@ -4,9 +4,10 @@ export type {
   Charm,
   Field,
   Fields,
-  FrameCandidate,
+  FrameMatch,
   PointRange,
   ReadResult,
   RejectReason,
+  SearchCharm,
   SkillInfo,
 } from '../../renkin-reader/pkg/renkin_reader.js'

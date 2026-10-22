@@ -46,7 +46,12 @@ fn synthetic_images_to_frames() {
             pts2: fields.pts2.value,
             slots: fields.slots.value,
         };
-        let got: Vec<u32> = renkin_reader::search_frames(&charm, fields.index.value, start, end)
+        // 画面と同じく、鑑定ボックスで読んだ位置が 5 以上なら何個目の指定なしにする
+        let charms = [renkin_reader::SearchCharm {
+            charm: charm.clone(),
+            index: fields.index.value.filter(|&i| i <= 4),
+        }];
+        let got: Vec<u32> = renkin_reader::search_frames(&charms, start, end)
             .unwrap()
             .iter()
             .map(|c| c.frame)

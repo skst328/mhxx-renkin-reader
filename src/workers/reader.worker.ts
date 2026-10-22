@@ -4,22 +4,22 @@ import init, {
   Reader,
   searchFrames,
   skills,
-  type Charm,
-  type FrameCandidate,
+  type FrameMatch,
   type ReadResult,
+  type SearchCharm,
   type SkillInfo,
 } from '../../renkin-reader/pkg/renkin_reader.js'
 
 export type WorkerRequest =
   | { id: number; type: 'read'; file: Blob }
-  | { id: number; type: 'search'; charm: Charm; index: number | null; start: number; end: number }
+  | { id: number; type: 'search'; charms: SearchCharm[]; start: number; end: number }
   /** 探索の中止。区切りの合間に受け付ける */
   | { id: number; type: 'cancel'; target: number }
 
 export type WorkerResponse =
   | { type: 'ready'; skills: SkillInfo[] }
   | { id: number; type: 'read'; result: ReadResult; aligned: Blob | null }
-  | { id: number; type: 'search'; found: FrameCandidate[] }
+  | { id: number; type: 'search'; found: FrameMatch[] }
   /** 探索の進み具合 (探し終えたフレームの数 / 全体) */
   | { id: number; type: 'progress'; done: number; total: number }
   | { id: number; type: 'cancelled' }
@@ -84,15 +84,15 @@ async function handle(request: WorkerRequest): Promise<void> {
       return
     }
     case 'search': {
-      const { id, charm, index, start, end } = request
-      const found: FrameCandidate[] = []
+      const { id, charms, start, end } = request
+      const found: FrameMatch[] = []
       // 列で待っている間に中止されていたら、始めずに終える
       if (cancelled.delete(id)) {
         post({ id, type: 'cancelled' })
         return
       }
       for (let a = start; a < end; a = Math.min(a + CHUNK, end)) {
-        found.push(...searchFrames(charm, index, a, Math.min(a + CHUNK, end)))
+        found.push(...searchFrames(charms, a, Math.min(a + CHUNK, end)))
         post({ id, type: 'progress', done: Math.min(a + CHUNK, end) - start, total: end - start })
         // 区切りの合間に、中止のメッセージを受け取れるようにする
         await new Promise((r) => setTimeout(r))

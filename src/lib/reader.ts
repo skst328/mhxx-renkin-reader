@@ -1,7 +1,7 @@
 // ページ側から Worker (src/workers/reader.worker.ts) に読み取りとフレーム探索を頼む。
 // Worker は一度に 1 つだけで、頼んだ順に 1 つずつ処理される。ページが裏に回ってしばらく何もしていなければ捨て
 // (wasm のメモリは一度広がると縮まないので、Worker ごと返す)、次に頼んだときに作り直す
-import type { Charm, FrameCandidate, ReadResult, SkillInfo } from '../../renkin-reader/pkg/renkin_reader.js'
+import type { FrameMatch, ReadResult, SearchCharm, SkillInfo } from '../../renkin-reader/pkg/renkin_reader.js'
 import type { WorkerRequest, WorkerResponse } from '../workers/reader.worker'
 import workerUrl from '../workers/reader.worker.ts?worker&url'
 
@@ -141,16 +141,15 @@ export async function readPhoto(file: Blob): Promise<{ result: ReadResult; align
   return { result: r.result, aligned: r.aligned }
 }
 
-/** 錬金時のフレームを探す。onProgress に進み具合 (探し終えたフレームの数, 全体) が届く。signal で中止できる
- * (中止したら AbortError で失敗する) */
+/** 錬金時のフレームを探す (charms が全部、それぞれ別の位置に出るフレーム)。onProgress に進み具合 (探し終えた
+ * フレームの数, 全体) が届く。signal で中止できる (中止したら AbortError で失敗する) */
 export async function searchFrames(
-  charm: Charm,
-  index: number | null,
+  charms: SearchCharm[],
   start: number,
   end: number,
   options: { onProgress?: (done: number, total: number) => void; signal?: AbortSignal } = {},
-): Promise<FrameCandidate[]> {
-  const r = await call({ type: 'search', charm, index, start, end }, options)
+): Promise<FrameMatch[]> {
+  const r = await call({ type: 'search', charms, start, end }, options)
   if (r.type !== 'search') throw new Error('探索の応答が不正')
   return r.found
 }
