@@ -340,14 +340,15 @@ export default function App() {
               </span>
             </span>
           </h1>
-          <p className="text-sm text-muted-foreground sm:text-base">鑑定画面の写真から、錬金時のフレームを特定します</p>
+          <p className="text-sm text-muted-foreground sm:text-base">鑑定画面の写真から錬金時のフレームを特定</p>
+          <p className="text-xs text-muted-foreground sm:text-sm">現在はマカ錬金 (最高ランク投入) のみ対応</p>
         </div>
         <ThemeToggle />
       </header>
 
       <p className="flex items-center justify-center gap-2 rounded-lg border border-primary/30 bg-primary/5 px-4 py-2.5 text-center text-sm font-medium sm:text-base">
         <ShieldCheckIcon className="size-5 shrink-0 text-primary" />
-        写真は端末の中だけで処理され、どこにも送信されません
+        写真は外部に送信されません
       </p>
 
       {dragging && (
