@@ -11,7 +11,7 @@ import type { SkillInfo } from '@/lib/types'
 
 const SLOTS: Option<number>[] = [0, 1, 2, 3].map((n) => ({ value: n, label: String(n) }))
 
-// ボックス内の位置は 1〜4 番目だけ (1 回の錬金で出るのは最大 4 個。5 以上は探索で「不明」と同じ扱いなので選ばせない)。
+// ボックス内の位置は 1〜4 番目だけ (1 回の錬金で出るのは最大 4 個。5 以上は 1 回の錬金の中での位置ではないので選ばせない)。
 // 0 を「不明」に使う (選択肢の値に null は使えないため)
 const INDEXES: Option<number>[] = [
   { value: 0, label: '不明' },
@@ -148,7 +148,8 @@ export function CharmForm({
           value={draft.slots}
           onChange={(v) => onChange('slots', v)}
           options={SLOTS}
-          placeholder="-"
+          // 「-」だとスロットなし (ゲームの画面では「ーーー」) と見分けにくいので、選んでいないことを言葉で示す
+          placeholder="未選択"
           className="w-36"
           attention={!!unsure.slots}
         />
