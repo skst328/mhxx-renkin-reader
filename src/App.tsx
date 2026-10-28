@@ -334,7 +334,7 @@ export default function App() {
             <img src={`${import.meta.env.BASE_URL}favicon.svg`} alt="" className="size-9 shrink-0 sm:size-10" />
             {/* 狭い幅で入りきらないときは、バージョンだけが次の行に回る */}
             <span>
-              MHXX 鑑定スキャン{' '}
+              MHXX 鑑定リーダー{' '}
               <span className="text-base font-normal whitespace-nowrap text-muted-foreground tabular-nums sm:text-lg">
                 v{__APP_VERSION__}
               </span>
