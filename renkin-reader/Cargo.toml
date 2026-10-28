@@ -8,6 +8,8 @@ crate-type = ["cdylib", "rlib"]
 
 [dependencies]
 serde = { version = "1", features = ["derive"] }
+# 乱数とお守りの作り方 (フレームの探索)
+mhxx-rand = { git = "https://github.com/skst328/mhxx-rand", tag = "v0.2.0" }
 
 # ブラウザ用の入口 (src/wasm.rs) だけが使う。PC 上のテストや wasm32-wasip1 (wasm の e2e) では入らない
 [target.'cfg(all(target_arch = "wasm32", target_os = "unknown"))'.dependencies]

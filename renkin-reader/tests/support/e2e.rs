@@ -12,7 +12,7 @@
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
-use renkin_reader::{Field, ReadResult, Reader, skills};
+use renkin_reader::{Field, ReadResult, Reader, skill_info};
 
 pub struct Answer {
     /// 表示用の名前 (answers.csv を探し始めた場所からの相対パス)
@@ -44,11 +44,12 @@ pub fn answers(root: &Path, dirs: &[&str]) -> Vec<Answer> {
         }
     }
     found.sort();
+    let skills = skill_info();
     let id = |name: &str| {
-        skills()
+        skills
             .iter()
-            .find(|(_, n)| *n == name)
-            .map(|(id, _)| *id)
+            .find(|s| s.name == name)
+            .map(|s| s.id)
             .unwrap_or_else(|| panic!("スキル名が表に無い: {name}"))
     };
     let mut out = Vec::new();

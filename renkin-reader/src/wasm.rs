@@ -1,5 +1,6 @@
 //! ブラウザ (TypeScript) から呼ぶ入口。本体を呼んで、結果を JS のオブジェクトに変えるだけ
 
+use serde::Serialize;
 use wasm_bindgen::prelude::*;
 
 use crate::types::{ReadResult, SearchCharm};
@@ -15,9 +16,12 @@ impl WasmReader {
         WasmReader(crate::Reader::new())
     }
 
-    /// RGBA の画素 (ImageData.data など。width x height x 4 バイト) を読む
-    pub fn read(&mut self, rgba: &[u8], width: u32, height: u32) -> Result<ReadResult, JsError> {
-        Ok(self.0.read(rgba, width, height)?)
+    /// RGBA の画素 (ImageData.data など。width x height x 4 バイト) を読む。値の無い欄は null にする
+    #[wasm_bindgen(unchecked_return_type = "ReadResult")]
+    pub fn read(&mut self, rgba: &[u8], width: u32, height: u32) -> Result<JsValue, JsError> {
+        let result: ReadResult = self.0.read(rgba, width, height)?;
+        let serializer = serde_wasm_bindgen::Serializer::new().serialize_missing_as_null(true);
+        Ok(result.serialize(&serializer)?)
     }
 
     /// 準備 (new Reader) の段階ごとの時間

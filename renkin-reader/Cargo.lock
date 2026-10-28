@@ -136,6 +136,11 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cf8baf1c55e62ffcace7a9f06f4bd9cd3f0c4beb022d3b367256b91b87513d98"
 
 [[package]]
+name = "mhxx-rand"
+version = "0.2.0"
+source = "git+https://github.com/skst328/mhxx-rand?tag=v0.2.0#5ca33df191500cff69e5ee26fef5fe2f65770865"
+
+[[package]]
 name = "miniz_oxide"
 version = "0.8.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -228,6 +233,7 @@ name = "renkin-reader"
 version = "0.1.0"
 dependencies = [
  "image",
+ "mhxx-rand",
  "png",
  "serde",
  "serde-wasm-bindgen",

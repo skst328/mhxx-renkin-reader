@@ -15,8 +15,10 @@ pnpm dev
 ```
 
 `wasm-pack` が要る。読み取りとフレーム探索は Web Worker (`src/workers/reader.worker.ts`) の中で wasm を動かす。
-読み取りの準備 (埋め込んだ型紙の特徴点と見本の下ごしらえ) は最初に写真を読むときに 1 回だけ行い、2 枚目以降は使い回す。
-ページが裏に回って 10 秒ほど何もしていなければ Worker を捨てて wasm のメモリを返し、次に頼んだときに作り直す。
+読み取りの準備 (埋め込んだ型紙の特徴点を取り出し、見本を下ごしらえする) は、
+最初に写真を読むときに行い、Worker がある間は使い回す。
+ページが裏に回って 10 秒ほど何もしていなければ、Worker を捨てて
+wasm のメモリを返し、次に頼んだときに作り直す (読み取りの準備もやり直す)。
 
 ## ライセンス
 
@@ -40,7 +42,7 @@ MIT License です。全文は [LICENSE](LICENSE) を参照してください。
 | [Geist](https://vercel.com/font) | **OFL-1.1** | フォント |
 | [wasm-bindgen](https://github.com/wasm-bindgen/wasm-bindgen) / serde / [tsify](https://github.com/madonoharu/tsify) ほか | MIT または Apache-2.0 | Rust から WebAssembly への橋渡し |
 | [OpenCV](https://github.com/opencv/opencv) | Apache-2.0 | 画像処理 (位置合わせ・読み取り) のアルゴリズム |
-| [apmnnn/mhxx-rng](https://github.com/apmnnn/mhxx-rng) | MIT | 乱数と護石の決まり方 (フレームの探索) |
+| [mhxx-rand](https://github.com/skst328/mhxx-rand) | MIT | 乱数と護石の決まり方 (フレームの探索) |
 
 **Geist** は SIL Open Font License 1.1 です。ライセンス全文は
 <https://github.com/vercel/geist-font> に含まれています。
@@ -49,5 +51,7 @@ MIT License です。全文は [LICENSE](LICENSE) を参照してください。
 該当するファイルには冒頭にその旨を記載しています。ライセンス全文と著作権表示は
 [THIRD_PARTY_LICENSES/OpenCV](THIRD_PARTY_LICENSES/OpenCV) にあります。
 
-**乱数と護石の決まり方** (`renkin-reader/src/rng.rs`、`renkin-reader/src/rng/`) は apmnnn 氏の mhxx-rng からの移植です。
-MIT ライセンスの全文は `renkin-reader/src/rng/xorshift.rs` の冒頭に記載しています。
+**乱数と護石の決まり方** は mhxx-rand を使っています。mhxx-rand は
+apmnnn 氏の [mhxx-rng](https://github.com/apmnnn/mhxx-rng) (MIT) の移植で、
+mhxx-rng の MIT ライセンスの全文は mhxx-rand の `rand-core/src/rng.rs` の冒頭に
+記載されています。

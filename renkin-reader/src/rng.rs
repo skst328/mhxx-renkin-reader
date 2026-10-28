@@ -1,221 +1,58 @@
-//! 乱数とフレームの探索: お守りが出る錬金のフレームを探す (マカフシギ錬金。投入は最高ランク)。
-//!
-//! apmnnn/mhxx-rng (https://github.com/apmnnn/mhxx-rng) の jujupush (meldingpush と juju_colors) と同じ手順で、
-//! 錬金したフレーム F ごとに:
-//!   1. F の 1 つ前の乱数から、風化した護石と古びた護石が何個ずつ出るかを決める
-//!   2. F から順に護石を作る。1 個につき乱数を 4 個 (第 2 スキルなし) か 6 個 (あり) 使う
-//!
-//! ライセンスは [`xorshift`] の記載を参照 (apmnnn/mhxx-rng, MIT)。
+//! お守りが出る錬金のフレームを探す (マカフシギ錬金。投入は最高ランク)。乱数とお守りの作り方は mhxx-rand
+//! (apmnnn/mhxx-rng の移植) を使い、ここでは画面とやり取りする型との間を受け渡すだけにする
 
-mod charm;
-mod xorshift;
+use mhxx_rand as rand;
 
-use charm::{Generated, Table, WEATHERED, WORN};
-use xorshift::{SEED, ascend, descend, jump};
+use crate::types::{Charm, FrameMatch, InputError, PointRange, SearchCharm, SkillInfo};
 
-use crate::types::{
-    Charm, FrameMatch, InputError, PointRange, SearchCharm, SkillInfo, union_range,
-};
-
-/// 1 回の錬金で出る護石の種類の数 (投入は最高ランク): 風化 (乱数 % 1 + 2 個)、古びた (乱数 % 2 + 1 個)。
-/// mhxx-rng の juju_colors の rank 4 の値 (幅, 最小)
-const WEATHERED_COUNT: (u32, u32) = (1, 2);
-const WORN_COUNT: (u32, u32) = (2, 1);
 /// 1 回の錬金で出る護石の最大の数 (風化 2 個 + 古びた 2 個)
 const MAX_CHARMS: u8 = 4;
-/// 錬金したフレームから、最後の護石の最初の乱数までの最大の間 (護石は最大 4 個で、1 個につき乱数を最大 6 個使う)
-const MAX_OFFSET: usize = 3 * 6;
-/// 手元に持つ乱数の数: 錬金の 1 つ前 + MAX_OFFSET + 最後の護石の 7 個より大きい 2 のべき
-const WINDOW: usize = 64;
 
-/// mhxx-rng の rand: 下位 16 bit を初期値に、0 なら 1 にして x176 mod 65363 を n 回
-fn rand(seed: u32, n: u32) -> u32 {
-    let mut v = seed & 0xFFFF;
-    for _ in 0..n {
-        v = v.max(1) * 176 % 65363;
-    }
-    v
-}
-
-/// 錬金で出る風化した護石と古びた護石の数 (mhxx-rng の juju_colors。seed は錬金の 1 つ前のフレームの乱数)
-fn counts(seed: u32) -> (usize, usize) {
-    let n1 = rand(seed, 1) % WEATHERED_COUNT.0 + WEATHERED_COUNT.1;
-    let n2 = rand(seed, 2) % WORN_COUNT.0 + WORN_COUNT.1;
-    (n1 as usize, n2 as usize)
-}
-
-/// フレーム f の乱数の状態 (f = -1 は初期値の 1 つ前)
-fn state(f: i64) -> [u32; 4] {
-    if f < 0 { descend(SEED) } else { jump(f as u64) }
-}
-
-/// 錬金で出る護石 (鑑定ボックスの並び順) と、その種類 (0 = 風化した護石、1 = 古びた護石)。
-/// v(d) は錬金したフレームの d - 1 個先の乱数 (v(0) が 1 つ前、v(1) が錬金したフレーム)。d は MAX_OFFSET + 7 まで使う
-fn meld(v: impl Fn(usize) -> u32) -> Vec<(u8, Generated)> {
-    let (n1, n2) = counts(v(0));
-    let tables = [&WEATHERED, &WORN];
-    let mut pos = 1;
-    (0..n1 + n2)
-        .map(|j| {
-            let k = usize::from(j >= n1);
-            let c = tables[k].make(&std::array::from_fn(|d| v(pos + d)));
-            pos += tables[k].stride(v(pos + 2));
-            (k as u8, c)
-        })
-        .collect()
-}
-
-/// frame で錬金したときに出る護石 (jump で frame へ飛んで作る)。テストで、Python 版や総当たりと比べるのに使う
-#[cfg(test)]
-fn melding(frame: u32) -> Vec<(u8, Generated)> {
-    // v[k] はフレーム frame - 1 + k の乱数
-    let mut s = state(frame as i64 - 1);
-    let v: Vec<u32> = (0..WINDOW)
-        .map(|_| {
-            let w = s[3];
-            s = ascend(s);
-            w
-        })
-        .collect();
-    meld(|d| v[d])
-}
-
-/// 作った護石が、鑑定画面で読んだ中身と同じか
-fn matches(c: &Generated, want: &Charm) -> bool {
-    if c.skill1 != want.skill1 || c.pts1 != want.pts1 || c.slots != want.slots {
-        return false;
-    }
-    match (want.skill2, want.pts2) {
-        (Some(s2), Some(p2)) => c.shows_skill2() && c.skill2 == Some(s2) && c.pts2 == p2,
-        (None, _) => !c.shows_skill2(),
-        (Some(_), None) => false,
-    }
-}
-
-/// 種類ごとの、読んだ護石になりうるかを護石を作る前に手早く見るための値
-struct Quick {
-    /// 第 1 スキルが表の何番目か (r0 % 表の長さ がこれなら第 1 スキルが合う)
-    loc1: u32,
-    /// r1 % width1 == rem1 なら第 1 スキルのポイントが合う
-    width1: u32,
-    rem1: u32,
-    /// 第 2 スキルが表の何番目か (読んだ護石に第 2 スキルがあるとき)
-    loc2: Option<u32>,
-}
-
-impl Quick {
-    /// t の種類で charm が出うるなら Some
-    fn new(t: &Table, charm: &Charm) -> Option<Self> {
-        let id1 = t.skill1.iter().position(|&s| s == charm.skill1)?;
-        let (lo, hi) = t.pts1[id1];
-        if !(lo as i8..=hi as i8).contains(&charm.pts1) {
-            return None;
-        }
-        let loc2 = match charm.skill2 {
-            Some(s2) => Some(t.skill2.iter().position(|&s| s == s2)? as u32),
-            None => None,
-        };
-        Some(Self {
-            loc1: id1 as u32,
-            width1: (hi - lo + 1) as u32,
-            rem1: (charm.pts1 - lo as i8) as u32,
-            loc2,
-        })
-    }
-}
-
-/// マカフシギ錬金で出るスキルと、第 1・第 2 スキルとしてのポイントの範囲 (スキル番号の小さい順)。
-/// 錬金の表 (風化した護石と古びた護石) から求める。フレームの探索と同じ表なので、画面の選択肢と食い違わない
+/// マカフシギ錬金で出るスキル (番号の小さい順) と、第 1・第 2 スキルとしてのポイントの範囲。名前は正式名称
+/// (鑑定画面の表記)。フレームの探索と同じ表から求めるので、画面の選択肢と食い違わない
 pub fn skill_info() -> Vec<SkillInfo> {
-    crate::skills()
+    let range = |r: &Option<std::ops::RangeInclusive<i8>>| {
+        r.as_ref().map(|r| PointRange {
+            min: *r.start(),
+            max: *r.end(),
+        })
+    };
+    rand::skill_info(rand::Melding::Juju)
         .iter()
-        .map(|&(id, name)| {
-            let mut skill1 = None;
-            let mut skill2 = None;
-            for t in [&WEATHERED, &WORN] {
-                if let Some(i) = t.skill1.iter().position(|&s| s == id) {
-                    let (lo, hi) = t.pts1[i];
-                    skill1 = union_range(
-                        skill1,
-                        Some(PointRange {
-                            min: lo as i8,
-                            max: hi as i8,
-                        }),
-                    );
-                }
-                if let Some(i) = t.skill2.iter().position(|&s| s == id) {
-                    skill2 = union_range(
-                        skill2,
-                        Some(PointRange {
-                            min: 1,
-                            max: t.pts2[i].1 as i8,
-                        }),
-                    );
-                }
-            }
-            SkillInfo {
-                id,
-                name,
-                skill1,
-                skill2,
-            }
+        .map(|i| SkillInfo {
+            id: i.skill.id(),
+            name: i.skill.full_name(),
+            skill1: range(&i.pts1),
+            skill2: range(&i.pts2),
         })
         .collect()
 }
 
-// 割る数を定数にして、割り算を掛け算に置き換えられるようにする
-const LEN1: [u32; 2] = [WEATHERED.skill1.len() as u32, WORN.skill1.len() as u32];
-const LEN2: [u32; 2] = [WEATHERED.skill2.len() as u32, WORN.skill2.len() as u32];
-const NO_SKILL2: [u32; 2] = [WEATHERED.no_skill2, WORN.no_skill2];
-
-/// 護石が乱数の列のある位置から作られる見込み (錬金の表からの大まかな値。スロットは見ない)。
-/// 小さいほど、乱数の列を流したときに見つかる位置が少ない
-fn density(quick: &[Option<Quick>; 2]) -> f64 {
-    (0..2)
-        .filter_map(|k| {
-            let q = quick[k].as_ref()?;
-            let skill2 = q.loc2.map_or(1.0, |_| {
-                f64::from(100 - NO_SKILL2[k]) / 100.0 / f64::from(LEN2[k])
-            });
-            Some(skill2 / f64::from(LEN1[k]) / f64::from(q.width1))
-        })
-        .sum()
-}
-
-/// 護石ごとの位置の候補 (options[k] は k 個目の護石が出る何個目) から、全部が別の位置になる選び方を 1 つ返す。
-/// 護石も位置も 4 つまでなので、全部試しても軽い
-fn distinct_positions(options: &[Vec<u8>]) -> Option<Vec<u8>> {
-    fn pick(options: &[Vec<u8>], chosen: &mut Vec<u8>) -> bool {
-        let Some((first, rest)) = options.split_first() else {
-            return true;
-        };
-        for &p in first {
-            if chosen.contains(&p) {
-                continue;
-            }
-            chosen.push(p);
-            if pick(rest, chosen) {
-                return true;
-            }
-            chosen.pop();
-        }
-        false
-    }
-    let mut chosen = Vec::new();
-    pick(options, &mut chosen).then_some(chosen)
+/// 画面の護石を mhxx-rand の探す条件にする。マカフシギ錬金で出ない護石 (お守りに付かないスキル、
+/// 第 2 スキルとポイントの片方だけ、表にない組み合わせ) なら None
+fn query(c: &Charm) -> Option<rand::Query> {
+    let skill1 = rand::Skill::from_id(c.skill1)?;
+    let skill2 = match (c.skill2, c.pts2) {
+        (Some(s), Some(p)) => Some((rand::Skill::from_id(s)?, p)),
+        (None, _) => None,
+        (Some(_), None) => return None,
+    };
+    let charm = rand::Charm {
+        skill1,
+        pts1: c.pts1,
+        skill2,
+        slots: c.slots,
+    };
+    rand::Query::new(rand::Melding::Juju, rand::Rank::MAX, None, &charm).ok()
 }
 
 /// [start, end) のフレームのうち、charms が全部 (index があればその何個目に、全部が別の位置に) 出るものを、
-/// 護石ごとの何個目と一緒に返す (フレームの小さい順)。charms が空なら空。
+/// 護石ごとの何個目と一緒に返す (フレームの小さい順)。charms が空なら空。どれか 1 つでもマカフシギ錬金で
+/// 出ない護石なら、どのフレームにも出ないので空。
 ///
 /// index は 1 回の錬金の中で何個目か (1〜4)。錬金を予約してまとめて行うと、鑑定ボックスには何回分もの護石が
 /// 続けて並ぶので、画面で読める何個目は 5 以上になりうる。そのときは 1 回の錬金の中での位置がわからないので、
 /// 呼ぶ側で指定なし (None) にして渡す (候補は増えるが、取りこぼさない)。1〜4 以外の index はエラー
-///
-/// フレームごとに護石の並びをたどると重いので、逆からたどる: 乱数の列を 1 回だけ流して「この位置の乱数から作る
-/// 護石が手がかりの護石になる」位置 p を探し (第 1 スキルが合うだけで 1/60 程度なので、まれ)、見つかったら p を
-/// 通りうる錬金のフレーム (p の 0〜18 個手前) を挙げる。挙げたフレームは、錬金の乱数がそろったところで護石を
-/// 作り直し、全部の護石が出るかを確かめる。手がかりには、いちばん出にくそうな護石を使う
 pub fn search_frames(
     charms: &[SearchCharm],
     start: u32,
@@ -231,107 +68,68 @@ pub fn search_frames(
     {
         return Err(InputError::Index { index });
     }
-    let wants: Vec<(&Charm, Option<u8>)> = charms.iter().map(|c| (&c.charm, c.index)).collect();
-    let tables = [&WEATHERED, &WORN];
-    let quicks: Vec<[Option<Quick>; 2]> = wants
+    let Some(targets) = charms
         .iter()
-        .map(|(c, _)| tables.map(|t| Quick::new(t, c)))
-        .collect();
-    // どれか 1 つでもマカ錬金で出ない護石なら、どのフレームにも出ない
-    if wants.is_empty() || quicks.iter().any(|q| q.iter().all(Option::is_none)) || start == end {
+        .map(|c| {
+            query(&c.charm).map(|query| rand::MeldingTarget {
+                query,
+                index: c.index,
+            })
+        })
+        .collect::<Option<Vec<_>>>()
+    else {
         return Ok(Vec::new());
-    }
-    let lead = (0..wants.len())
-        .min_by(|&a, &b| density(&quicks[a]).total_cmp(&density(&quicks[b])))
-        .unwrap();
-    let (charm, index) = wants[lead];
-    let quick = &quicks[lead];
-    let loc1 = quick
-        .each_ref()
-        .map(|q| q.as_ref().map_or(u32::MAX, |q| q.loc1));
-    // 位置は u = フレーム - (start - 1) で数える。v[u % WINDOW] がその位置の乱数。
-    // 錬金したフレーム F (u = 1 ..= n) の護石は u = F .. F + 18 から始まり、その乱数は 7 個先まで使う
-    let n = (end - start) as usize;
-    let last_p = n + MAX_OFFSET;
-    let mut v = [0u32; WINDOW];
-    let mut s = state(start as i64 - 1);
-    // 手がかりの護石が出うる錬金のフレーム (u)。作り直すのに要る乱数 (u - 1 .. u + MAX_OFFSET + 6) がそろったら
-    // 確かめる。p から挙げるフレームは p - 18 以上なので、確かめ終えたフレームより前のものが後から来ることはない
-    let mut pending = std::collections::BTreeSet::new();
-    let mut found = Vec::new();
-    for q in 0..=last_p + 6 {
-        v[q % WINDOW] = s[3];
-        s = ascend(s);
-        let at = |u: usize| v[u % WINDOW];
-        // 乱数が 7 個そろった位置 p から作る護石を見る
-        if let Some(p) = q.checked_sub(6).filter(|&p| p >= 1) {
-            for k in 0..2 {
-                let Some(qk) = &quick[k] else { continue };
-                if at(p) % LEN1[k] != loc1[k]
-                    || at(p + 1) % qk.width1 != qk.rem1
-                    || qk
-                        .loc2
-                        .is_some_and(|l| at(p + 2) % 100 < NO_SKILL2[k] || at(p + 3) % LEN2[k] != l)
-                {
-                    continue;
-                }
-                let r: [u32; 7] = std::array::from_fn(|d| at(p + d));
-                if !matches(&tables[k].make(&r), charm) {
-                    continue;
-                }
-                // p を k の種類の護石として通る錬金のフレームを探す
-                for f in p.saturating_sub(MAX_OFFSET).max(1)..=p.min(n) {
-                    let (n1, n2) = counts(at(f - 1));
-                    let mut pos = f;
-                    for j in 0..n1 + n2 {
-                        if pos >= p {
-                            if pos == p
-                                && usize::from(j >= n1) == k
-                                && index.is_none_or(|i| j + 1 == i as usize)
-                            {
-                                pending.insert(f);
-                            }
-                            break;
-                        }
-                        pos += tables[usize::from(j >= n1)].stride(at(pos + 2));
-                    }
-                }
-            }
-        }
-        while let Some(&u) = pending.first() {
-            if u + MAX_OFFSET + 6 > q {
-                break;
-            }
-            pending.pop_first();
-            let made = meld(|d| at(u - 1 + d));
-            // 護石ごとに、作った護石のうち何個目に出るか
-            let indexes: Vec<Vec<u8>> = wants
-                .iter()
-                .map(|(c, index)| {
-                    (0..made.len())
-                        .filter(|&j| {
-                            index.is_none_or(|i| j + 1 == i as usize) && matches(&made[j].1, c)
-                        })
-                        .map(|j| j as u8 + 1)
-                        .collect()
-                })
-                .collect();
-            if let Some(positions) = distinct_positions(&indexes) {
-                found.push(FrameMatch {
-                    frame: start + (u - 1) as u32,
-                    indexes,
-                    positions,
-                });
-            }
-        }
-    }
-    Ok(found)
+    };
+    // 何個目と錬金のやり方は確かめてあるので、エラーにはならない
+    let found = rand::search_meldings(&targets, u64::from(start)..u64::from(end))
+        .expect("何個目と錬金のやり方は確かめてある");
+    Ok(found
+        .into_iter()
+        .map(|m| FrameMatch {
+            frame: m.frame as u32,
+            indexes: m.indexes,
+            positions: m.positions,
+        })
+        .collect())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::testutil::json_fixture;
+
+    /// 錬金したフレームから、最後の護石の最初の乱数までの最大の間 (護石は最大 4 個で、1 個につき乱数を最大 6 個使う)
+    const MAX_OFFSET: u32 = 3 * 6;
+
+    /// フレーム frame で錬金したときに出る護石 (鑑定ボックスの並び順) と、その種類 (0 = 風化、1 = 古びた)
+    fn melding(frame: u32) -> Vec<(u8, rand::Generated)> {
+        rand::meld(rand::Melding::Juju, rand::Rank::MAX, u64::from(frame))
+            .into_iter()
+            .map(|(k, c)| (u8::from(k == rand::Kind::Worn), c))
+            .collect()
+    }
+
+    /// 護石ごとの位置の候補 (options[k] は k 個目の護石が出る何個目) から、全部が別の位置になる選び方を 1 つ返す
+    fn distinct_positions(options: &[Vec<u8>]) -> Option<Vec<u8>> {
+        fn pick(options: &[Vec<u8>], chosen: &mut Vec<u8>) -> bool {
+            let Some((first, rest)) = options.split_first() else {
+                return true;
+            };
+            for &p in first {
+                if chosen.contains(&p) {
+                    continue;
+                }
+                chosen.push(p);
+                if pick(rest, chosen) {
+                    return true;
+                }
+                chosen.pop();
+            }
+            false
+        }
+        let mut chosen = Vec::new();
+        pick(options, &mut chosen).then_some(chosen)
+    }
 
     /// mhxx-rng の番号の並び (-1 = なし) から
     fn charm(v: &serde_json::Value) -> Charm {
@@ -365,13 +163,14 @@ mod tests {
     }
 
     /// 画面に出る中身 (第 1 スキルと同じ第 2 スキルは出ない)
-    fn shown(c: &Generated) -> Charm {
+    fn shown(c: &rand::Generated) -> Charm {
+        let s = c.shown();
         Charm {
-            skill1: c.skill1,
-            pts1: c.pts1,
-            skill2: c.skill2.filter(|_| c.shows_skill2()),
-            pts2: c.shows_skill2().then_some(c.pts2),
-            slots: c.slots,
+            skill1: s.skill1.id(),
+            pts1: s.pts1,
+            skill2: s.skill2.map(|(k, _)| k.id()),
+            pts2: s.skill2.map(|(_, p)| p),
+            slots: s.slots,
         }
     }
 
@@ -387,10 +186,10 @@ mod tests {
                 .map(|(k, c)| {
                     [
                         *k as i64,
-                        c.skill1 as i64,
+                        c.skill1.id() as i64,
                         c.pts1 as i64,
-                        c.skill2.map_or(-1, |s| s as i64),
-                        c.pts2 as i64,
+                        c.skill2.map_or(-1, |(s, _)| s.id() as i64),
+                        c.skill2.map_or(0, |(_, p)| p as i64),
                         c.slots as i64,
                     ]
                 })
@@ -402,42 +201,6 @@ mod tests {
                 .map(|c| std::array::from_fn(|i| c[i].as_i64().unwrap()))
                 .collect();
             assert_eq!(got, want, "フレーム {frame}");
-        }
-    }
-
-    /// 上のテストの錬金の結果に、2 種類の表の第 1 スキルと第 2 スキルがどれも最低 1 回は出てくる (表のどの行も
-    /// 一度は通っている)。正解を作り直して足りなくなったら、ここで気づく
-    #[test]
-    fn melding_cases_cover_every_skill() {
-        let f = json_fixture("rng/melding.json");
-        let mut seen = std::collections::HashSet::new();
-        for m in f["meldings"].as_array().unwrap() {
-            for c in m["charms"].as_array().unwrap() {
-                let n = |i: usize| c[i].as_i64().unwrap();
-                seen.insert((n(0), 1, n(1)));
-                if n(3) >= 0 {
-                    seen.insert((n(0), 2, n(3)));
-                }
-            }
-        }
-        for (k, t) in [&WEATHERED, &WORN].iter().enumerate() {
-            let k = k as i64;
-            let miss1: Vec<u16> = t
-                .skill1
-                .iter()
-                .copied()
-                .filter(|&s| !seen.contains(&(k, 1, s as i64)))
-                .collect();
-            let miss2: Vec<u16> = t
-                .skill2
-                .iter()
-                .copied()
-                .filter(|&s| !seen.contains(&(k, 2, s as i64)))
-                .collect();
-            assert!(
-                miss1.is_empty() && miss2.is_empty(),
-                "種類 {k}: 第 1 スキルで出ていない {miss1:?}、第 2 スキルで出ていない {miss2:?}"
-            );
         }
     }
 
@@ -494,7 +257,7 @@ mod tests {
     #[test]
     fn search_matches_brute_force() {
         let (start, end) = (0u32, 30_000u32);
-        let all: Vec<Vec<(u8, Generated)>> = (start..end + 1).map(melding).collect();
+        let all: Vec<Vec<(u8, rand::Generated)>> = (start..end + 1).map(melding).collect();
         // よく出る護石 (第 2 スキルなし) と、まれな護石を、いくつかのフレームから選ぶ
         let picks = [0usize, 1, 17, 4321, 29_999];
         for &f in &picks {
@@ -564,7 +327,7 @@ mod tests {
             let pos = case["frame"].as_u64().unwrap() as u32;
             let near = got
                 .iter()
-                .filter(|&&g| g + MAX_OFFSET as u32 >= pos && g <= pos)
+                .filter(|&&g| g + MAX_OFFSET >= pos && g <= pos)
                 .count();
             assert_eq!(
                 near as u64,
@@ -572,20 +335,6 @@ mod tests {
                 "{name}: 当たりフレームの数"
             );
         }
-    }
-
-    /// 錬金の表に出てくるスキルが、スキルの一覧 (skills.rs) とちょうど同じ
-    #[test]
-    fn tables_cover_the_skill_list() {
-        let mut ids: Vec<u16> = [&WEATHERED, &WORN]
-            .iter()
-            .flat_map(|t| t.skill1.iter().chain(t.skill2))
-            .copied()
-            .collect();
-        ids.sort();
-        ids.dedup();
-        let list: Vec<u16> = crate::skills().iter().map(|(id, _)| *id).collect();
-        assert_eq!(ids, list);
     }
 
     /// 何個目が 1〜4 でない (0 や、鑑定ボックスで読んだ 5 以上の位置をそのまま渡した) ならエラー。
@@ -628,7 +377,8 @@ mod tests {
     #[test]
     fn skill_ranges_cover_generated_charms() {
         let info = skill_info();
-        assert_eq!(info.len(), crate::skills().len());
+        assert_eq!(info.len(), 134);
+        assert!(info.windows(2).all(|w| w[0].id < w[1].id));
         assert!(
             info.iter()
                 .all(|s| s.skill1.is_some() || s.skill2.is_some())
@@ -671,7 +421,7 @@ mod tests {
     }
 
     /// 錬金で出た護石 made のうち、want が何個目に出るか (index があればその位置だけ)
-    fn places(made: &[(u8, Generated)], want: &SearchCharm) -> Vec<u8> {
+    fn places(made: &[(u8, rand::Generated)], want: &SearchCharm) -> Vec<u8> {
         (0..made.len())
             .filter(|&j| {
                 want.index.is_none_or(|i| j + 1 == i as usize) && shown(&made[j].1) == want.charm
@@ -706,7 +456,7 @@ mod tests {
     fn multi_search_matches_brute_force() {
         for start in [0u32, 999_970_000] {
             let end = start + 30_000;
-            let all: Vec<Vec<(u8, Generated)>> = (start..end).map(melding).collect();
+            let all: Vec<Vec<(u8, rand::Generated)>> = (start..end).map(melding).collect();
             // f は start からの何フレーム目か
             let pick = |f: usize, j: usize, index: bool| SearchCharm {
                 charm: shown(&all[f][j].1),

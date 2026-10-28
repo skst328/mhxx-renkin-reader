@@ -21,7 +21,7 @@ MHXX の錬金結果の鑑定画面を写真から読む Rust のクレート。
 | 型紙の SIFT が NumPy 版と bit-exact、OpenCV と特徴点が全部・記述子が 1402 / 1415 同じ | `src/vision/cv/sift.rs` | `tests/fixtures/sift/` |
 | 埋め込んだ型紙の特徴量が、今の SIFT で型紙から求めたものとバイト単位で同じ | `src/vision/align.rs` (`reference_features_are_up_to_date`) | `assets/reference_features.bin` |
 | RANSAC と最小二乗がインライアの判定まで NumPy 版と同じ | `src/vision/cv/ransac.rs` | `tests/fixtures/cv/ransac.json` |
-| 錬金で出る護石とフレームの探索が mhxx-rng (ノートブック) と同じ (2 種類の表の全スキルを最低 1 回通す)。探索は 1 フレームずつ素直に作ったものとも同じ。mhxx-rng の「有名なお守り」6 個を 0〜10 億フレームで探して、Python 版と同じで当たりフレームの数も一覧と同じ (これだけで 20 秒ほど) | `src/rng.rs` | `tests/fixtures/rng/` |
+| 錬金で出る護石とフレームの探索 (mhxx-rand を使う) が mhxx-rng (ノートブック) と同じ。探索は 1 フレームずつ素直に作ったものとも同じ。mhxx-rng の「有名なお守り」6 個を 0〜10 億フレームで探して、Python 版と同じで当たりフレームの数も一覧と同じ (これだけで 20 秒ほど) | `src/rng.rs` | `tests/fixtures/rng/` |
 | 人工の写真 12 枚を写真から最後まで読んで、期待どおり (読める 10 枚、撮り直し 2 枚) | `tests/synthetic.rs` | `tests/synthetic/answers.csv` |
 | 読み取りからフレーム探索まで: 読める 10 枚を読み、読んだ護石と何個目でフレーム (0〜100 万) を探して、候補が期待どおり。素材の 4 枚は 1 回のマカフシギ錬金の 1〜4 個目なので、全部の候補に共通するのはその錬金のフレーム 383346 だけ (mhxx-rng で錬金した結果がキャプチャと並びまで一致する) | `tests/synthetic.rs` | `tests/synthetic/frames.json` |
 | そのほか (埋め込んだ見本、スキル表、入力の長さ、ぼかしの足し算の順番、記述子の距離の SIMD 版) | 各ファイル | — |

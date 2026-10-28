@@ -4,7 +4,6 @@
 //! (wasm32-wasip1 は wasm の中でテストを流す用で、入口は入らない)。
 
 mod rng;
-mod skills;
 #[cfg(test)]
 mod testutil;
 mod timing;
@@ -16,20 +15,3 @@ mod wasm;
 pub use rng::{search_frames, skill_info};
 pub use types::*;
 pub use vision::{Reader, SCREEN_HEIGHT, SCREEN_WIDTH};
-
-/// マカフシギ錬金で出るスキルの (番号, 表示名)。番号の小さい順
-pub fn skills() -> &'static [(SkillId, &'static str)] {
-    &skills::SKILLS
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn skills_are_unique_and_sorted() {
-        let s = skills();
-        assert_eq!(s.len(), 134);
-        assert!(s.windows(2).all(|w| w[0].0 < w[1].0));
-    }
-}
