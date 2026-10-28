@@ -54,7 +54,14 @@ async function decode(file: Blob): Promise<ImageData> {
   try {
     bitmap = await createImageBitmap(file, { imageOrientation: 'from-image' })
   } catch {
-    throw new DecodeError('この画像は開けません。HEIC は対応していないブラウザがあるので、JPEG で保存し直してください')
+    // HEIC は開けないブラウザがあるので、JPEG での保存を案内する。それ以外 (JPEG でもスマホのメモリが足りないと
+    // 開けないことがある) は、原因を決めつけない
+    const heic = /hei[cf]/i.test(file.type) || (file instanceof File && /\.hei[cf]$/i.test(file.name))
+    throw new DecodeError(
+      heic
+        ? 'この画像は開けません。HEIC は対応していないブラウザがあるので、JPEG で保存し直してください'
+        : '読み取りに失敗しました',
+    )
   }
   const canvas = new OffscreenCanvas(bitmap.width, bitmap.height)
   const context = canvas.getContext('2d')
